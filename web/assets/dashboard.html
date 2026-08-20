@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZAGROOO Wizard — Panels</title>
+    <link rel="icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link href="theme.css" rel="stylesheet" />
+    <link href="dashboard.css" rel="stylesheet" />
+    <script>
+        (function () {
+            var root = document.documentElement;
+            try {
+                root.classList.toggle('dark', localStorage.getItem('zag-theme') !== 'light');
+            } catch (e) {
+                root.classList.add('dark');
+            }
+            document.addEventListener('click', function (event) {
+                if (!event.target.closest || !event.target.closest('#theme-toggle')) return;
+                var isDark = root.classList.toggle('dark');
+                try { localStorage.setItem('zag-theme', isDark ? 'dark' : 'light'); } catch (err) { }
+            });
+        })();
+    </script>
+</head>
+
+<body>
+    <button id="theme-toggle" class="zag-theme-toggle" type="button" title="Toggle theme" aria-label="Toggle theme">
+        <svg class="icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <svg class="icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+    </button>
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M13 2 4.5 13.5H10L9 22l8.5-11.5H12L13 2z" />
+                </svg>
+            </span>
+            <span class="brand-name">ZAGROOO Wizard</span>
+        </div>
+        <div class="topbar-right">
+            <span class="account" id="account">Not connected</span>
+            <a class="btn btn-ghost" href="/">Install a panel</a>
+        </div>
+    </header>
+
+    <main class="wrap">
+        <!-- ---------- connect ---------- -->
+        <section class="card" id="connect-card">
+            <h2>Connect your Cloudflare account</h2>
+            <p class="muted">
+                Paste the API token the wizard used to install your panels, or use the private link
+                you were given after an install. The token is used for this session only and is never stored.
+            </p>
+            <div class="row">
+                <input type="password" id="token" placeholder="Cloudflare API token" autocomplete="off" />
+                <button class="btn btn-accent" id="connect" type="button">Connect</button>
+            </div>
+            <p class="muted small">
+                Minimum scopes: Workers Scripts Edit, Workers KV Storage Edit, D1 Edit, Pages Edit,
+                Account Settings Read, User Details Read.
+            </p>
+        </section>
+
+        <!-- ---------- panels ---------- -->
+        <section id="panels-section" hidden>
+            <div class="toolbar">
+                <input type="search" id="search" placeholder="Filter panels…" />
+                <div class="toolbar-right">
+                    <span class="muted small" id="count">—</span>
+                    <button class="btn btn-ghost" id="refresh" type="button">Refresh</button>
+                </div>
+            </div>
+
+            <div id="panels" class="panel-grid"></div>
+
+            <div class="pager" id="pager" hidden>
+                <button class="btn btn-ghost" id="prev" type="button">Previous</button>
+                <span class="muted small" id="page-label">—</span>
+                <button class="btn btn-ghost" id="next" type="button">Next</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- ---------- edit modal ---------- -->
+    <div class="modal" id="edit-modal" hidden>
+        <div class="modal-card">
+            <button class="modal-close" id="edit-close" type="button">✕</button>
+            <h3 id="edit-title">Panel</h3>
+
+            <div class="plan-row">
+                <span class="muted small">Plan templates</span>
+                <div class="plan-buttons">
+                    <button class="chip-btn" data-plan="30:50:0" type="button">30d · 50GB</button>
+                    <button class="chip-btn" data-plan="30:100:6144" type="button">30d · 100GB · 6MB/s</button>
+                    <button class="chip-btn" data-plan="1:2:0" type="button">Trial 1d · 2GB</button>
+                    <button class="chip-btn" data-plan="0:0:0" type="button">Unlimited</button>
+                </div>
+            </div>
+
+            <div class="field-grid">
+                <label>Display name<input type="text" id="f-name" /></label>
+                <label>Total volume (GB)<input type="number" id="f-total" min="0" step="0.01" /></label>
+                <label>Daily volume (GB)<input type="number" id="f-daily" min="0" step="0.01" /></label>
+                <label>Download cap (KB/s)<input type="number" id="f-down" min="0" step="1" /></label>
+                <label>Upload cap (KB/s)<input type="number" id="f-up" min="0" step="1" /></label>
+                <label>Expiry date<input type="date" id="f-expiry" /></label>
+                <label>Max devices<input type="number" id="f-devices" min="0" step="1" /></label>
+                <label>Reset day (1-28)<input type="number" id="f-reset-day" min="1" max="28" step="1" /></label>
+                <label class="check">Monthly reset<input type="checkbox" id="f-monthly" /></label>
+                <label class="check">Quota alert<input type="checkbox" id="f-alert-quota" /></label>
+                <label class="check">Expiry alert<input type="checkbox" id="f-alert-expiry" /></label>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-accent" id="edit-save" type="button">Save limits</button>
+                <button class="btn btn-ghost" id="edit-pause" type="button">Pause</button>
+                <button class="btn btn-ghost" id="edit-reset" type="button">Reset usage</button>
+                <button class="btn btn-danger" id="edit-delete" type="button">Delete panel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="dashboard.js"></script>
+</body>
+
+</html>

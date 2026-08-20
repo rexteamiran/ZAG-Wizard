@@ -1,0 +1,17 @@
+# Keep line endings stable across Windows, macOS and Linux checkouts, so a
+# clone on one platform does not show every file as modified on another.
+* text=auto eol=lf
+
+# Shell scripts break outright with CRLF.
+*.sh text eol=lf
+
+# PowerShell is happiest with CRLF on Windows.
+*.ps1 text eol=crlf
+
+# Binaries must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gz binary
+*.zip binary

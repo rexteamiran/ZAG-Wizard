@@ -1,0 +1,33 @@
+{
+    "name": "zagrooo-wizard",
+    "version": "1.0.0",
+    "description": "ZAGROOO Wizard \u2014 install and manage ZAGROOO panels",
+    "main": "public/index.js",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/rexteamiran/ZAG-Wizard.git"
+    },
+    "author": "rexteamiran",
+    "license": "GPL-3.0",
+    "private": true,
+    "type": "module",
+    "bugs": {
+        "url": "https://github.com/rexteamiran/ZAG-Wizard/issues"
+    },
+    "homepage": "https://github.com/rexteamiran/ZAG-Wizard#readme",
+    "devDependencies": {
+        "@cloudflare/workers-types": "^5.20260716.1",
+        "typescript": "^7.0.2",
+        "wrangler": "^4.0.0"
+    },
+    "dependencies": {
+        "cloudflare": "^7.0.0"
+    },
+    "scripts": {
+        "build-local": "node scripts/build-local.js",
+        "check": "tsc --noEmit",
+        "local": "node scripts/build-local.js && node scripts/local-server.mjs",
+        "dev": "wrangler dev",
+        "deploy": "wrangler deploy"
+    }
+}

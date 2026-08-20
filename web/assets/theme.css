@@ -1,0 +1,241 @@
+/* ==========================================================================
+   ZAGROOO design tokens
+   Shared by the wizard web UI and the local wizard page. Colour language is Persian folk — deep teal,
+   terracotta clay, cream and sand. Flat surfaces, 1px lines, soft shadows.
+
+   The legacy --color-* names are kept as aliases so the existing panel
+   stylesheets keep working while pointing at the new palette.
+   ========================================================================== */
+
+:root {
+    /* ---- brand hues, identical in both themes ---- */
+    --clay: #D0523A;
+    --clay-deep: #A83C27;
+    --clay-soft: #E9B489;
+    --teal: #1B3B3F;
+    --teal-deep: #10262A;
+    --cream: #FBF3E7;
+    --cream-2: #F3E8D6;
+
+    /* ---- light theme ---- */
+    --canvas: #E7DCC9;
+    --shell: #FFFCF6;
+    --surface: #FFFCF6;
+    --surface-2: #FBF3E7;
+    --surface-3: #F5EADA;
+    --field: #FBF3E7;
+    --line: #E5D8C2;
+    --line-soft: #EFE4D2;
+    --text: #1B3B3F;
+    --text-2: #3C5B5C;
+    --muted: #7C8E88;
+    --faint: #A79E8C;
+    --accent: #D0523A;
+    --accent-hover: #B8452F;
+    --accent-tint: rgba(208, 82, 58, 0.10);
+    --accent-tint-2: rgba(208, 82, 58, 0.18);
+    --on-accent: #FFF7EF;
+    --track: #EADDC8;
+
+    --ok: #2E8B72;
+    --warn: #C08341;
+    --danger: #C0442B;
+
+    --green-bg: rgba(46, 139, 114, 0.12);
+    --green-border: rgba(46, 139, 114, 0.35);
+    --green-text: #1F6E58;
+    --amber-bg: rgba(192, 131, 65, 0.14);
+    --amber-border: rgba(192, 131, 65, 0.38);
+    --amber-text: #99652C;
+    --red-bg: rgba(192, 68, 43, 0.12);
+    --red-border: rgba(192, 68, 43, 0.36);
+    --red-text: #A83C27;
+
+    --shadow-shell: 0 24px 60px -30px rgba(27, 59, 63, 0.45);
+    --shadow-soft: 0 2px 6px -2px rgba(27, 59, 63, 0.10);
+    --pattern-opacity: 0.5;
+
+    --radius-shell: 22px;
+    --radius-card: 16px;
+    --radius-item: 12px;
+
+    --font-sans: 'Inter', 'Twemoji Country Flags', system-ui, sans-serif;
+    --font-fa: 'Vazirmatn', 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+    --transition-standard: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- dark theme: deep teal night (default) ---- */
+html.dark {
+    --canvas: #0C1F23;
+    --shell: #143034;
+    --surface: #143034;
+    --surface-2: #193A3E;
+    --surface-3: #1F4448;
+    --field: #102A2E;
+    --line: #24494D;
+    --line-soft: #1D3E42;
+    --text: #FBF3E7;
+    --text-2: #DCCFBB;
+    --muted: #93AAA7;
+    --faint: #6E8886;
+    --accent: #E2684D;
+    --accent-hover: #F07C60;
+    --accent-tint: rgba(226, 104, 77, 0.14);
+    --accent-tint-2: rgba(226, 104, 77, 0.24);
+    --on-accent: #17272A;
+    --track: #10292D;
+
+    --ok: #4FBF9E;
+    --warn: #E0A55E;
+    --danger: #EE7259;
+
+    --green-bg: rgba(79, 191, 158, 0.14);
+    --green-border: rgba(79, 191, 158, 0.36);
+    --green-text: #6DD6B6;
+    --amber-bg: rgba(224, 165, 94, 0.14);
+    --amber-border: rgba(224, 165, 94, 0.38);
+    --amber-text: #EDBC7C;
+    --red-bg: rgba(238, 114, 89, 0.14);
+    --red-border: rgba(238, 114, 89, 0.38);
+    --red-text: #F5907B;
+
+    --shadow-shell: 0 30px 70px -30px rgba(0, 0, 0, 0.75);
+    --shadow-soft: 0 2px 8px -3px rgba(0, 0, 0, 0.5);
+    --pattern-opacity: 0.28;
+}
+
+/* ==========================================================================
+   Legacy aliases — the existing panel stylesheets are written against these.
+   ========================================================================== */
+
+:root {
+    --color-bg-main: var(--canvas);
+    --color-bg-card: var(--surface);
+    --color-bg-input: var(--field);
+    --color-bg-modal: var(--surface-2);
+    --color-bg-btn: var(--accent-tint);
+
+    --color-border-ui: var(--line);
+    --color-border-accent: var(--line);
+
+    --color-icon-green: var(--ok);
+    --color-icon-red: var(--danger);
+
+    --color-text-primary: var(--text);
+    --color-text-secondary: var(--text-2);
+    --color-text-muted: var(--muted);
+    --color-text-btn: var(--accent);
+
+    --color-brand-primary: var(--accent);
+    --color-brand-hover: var(--accent-hover);
+    --color-brand-light-focus: var(--accent-tint-2);
+
+    --radius-ui: var(--radius-item);
+    --radius-btn: var(--radius-item);
+
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 0.85rem;
+    --space-lg: 1rem;
+    --space-xl: 1.5rem;
+
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-base: 1rem;
+    --font-size-lg: 1.7rem;
+    --font-size-xlg: 2rem;
+
+    --line-height-xs: 1rem;
+    --line-height-sm: 1.25rem;
+    --line-height-lg: 2rem;
+
+    --shadow-header: none;
+    --shadow-icon: none;
+    --shadow-card: var(--shadow-shell);
+    --shadow-input: inset 0 0 0 1px var(--line);
+    --shadow-input-focus: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-tint-2);
+
+    --element-border-radius: var(--radius-item);
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+html {
+    color-scheme: light;
+}
+
+html.dark {
+    color-scheme: dark;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--canvas);
+    color: var(--text);
+    transition: background 0.35s ease, color 0.35s ease;
+}
+
+html[lang="fa"] body,
+html[lang="fa"] input,
+html[lang="fa"] button,
+html[lang="fa"] select,
+html[lang="fa"] textarea {
+    font-family: var(--font-fa);
+}
+
+/* Theme toggle affordance shared by every surface. */
+.zag-theme-toggle {
+    position: fixed;
+    top: 1rem;
+    inset-inline-end: 1rem;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-item);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+    transition: var(--transition-standard);
+}
+
+.zag-theme-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.zag-theme-toggle .icon-dark {
+    display: none;
+}
+
+html.dark .zag-theme-toggle .icon-dark {
+    display: inline;
+}
+
+html.dark .zag-theme-toggle .icon-light {
+    display: none;
+}
+
+/* ==========================================================================
+   Wizard-specific legacy aliases
+   ========================================================================== */
+
+:root {
+    --color-bg-toast: var(--surface-2);
+    --color-bg-toast-header: var(--surface-3);
+
+    --color-info: var(--accent);
+    --color-success: var(--ok);
+    --color-failure: var(--danger);
+    --color-terminal-text: var(--text-2);
+
+    --shadow-terminal: var(--shadow-shell);
+}
