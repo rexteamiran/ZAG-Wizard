@@ -9,6 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const permissions = [
         { key: 'workers_scripts', type: 'edit' },
         { key: 'workers_kv_storage', type: 'edit' },
+        // Usage accounting lives in D1. Without this the panel silently falls
+        // back to KV, which allows far fewer writes per day.
+        { key: 'd1', type: 'edit' },
         { key: 'page', type: 'edit' },
         { key: 'dns', type: 'edit' },
         { key: 'user_details', type: 'read' }

@@ -77,13 +77,59 @@
             </p>
         </section>
 
+        <!-- ---------- account quota ---------- -->
+        <section class="card quota-card" id="quota-card" hidden>
+            <div class="quota-head">
+                <div>
+                    <strong>Account requests today</strong>
+                    <span class="muted small" id="quota-note">
+                        The free plan allows 100,000 requests per day across every worker on the account.
+                        When it runs out, all your panels stop at once.
+                    </span>
+                </div>
+                <span class="pill" id="quota-pill">—</span>
+            </div>
+            <div class="track"><span class="bar" id="quota-bar"></span></div>
+            <span class="muted small" id="quota-text">—</span>
+        </section>
+
+        <!-- ---------- tabs ---------- -->
+        <nav class="tabs" id="tabs" hidden>
+            <button class="tab is-active" data-tab="panels" type="button">Panels</button>
+            <button class="tab" data-tab="zagiro" type="button">ZagiRo profiles</button>
+        </nav>
+
         <!-- ---------- panels ---------- -->
         <section id="panels-section" hidden>
             <div class="toolbar">
                 <input type="search" id="search" placeholder="Filter panels…" />
+                <select id="sort" class="form-select">
+                    <option value="name">Sort: name</option>
+                    <option value="usage">Sort: most used</option>
+                    <option value="expiry">Sort: expiring soonest</option>
+                    <option value="status">Sort: problems first</option>
+                </select>
                 <div class="toolbar-right">
                     <span class="muted small" id="count">—</span>
+                    <button class="btn btn-ghost" id="export" type="button">Export CSV</button>
                     <button class="btn btn-ghost" id="refresh" type="button">Refresh</button>
+                </div>
+            </div>
+
+            <div class="bulkbar" id="bulkbar" hidden>
+                <label class="check-inline">
+                    <input type="checkbox" id="select-all" />
+                    <span id="selected-count">0 selected</span>
+                </label>
+                <div class="bulk-actions">
+                    <select id="bulk-profile" class="form-select">
+                        <option value="">Apply ZagiRo profile…</option>
+                    </select>
+                    <button class="btn btn-accent" id="bulk-apply" type="button">Apply</button>
+                    <button class="btn btn-ghost" id="bulk-update" type="button">Update panels</button>
+                    <button class="btn btn-ghost" id="bulk-pause" type="button">Pause</button>
+                    <button class="btn btn-ghost" id="bulk-resume" type="button">Resume</button>
+                    <button class="btn btn-ghost" id="bulk-health" type="button">Health check</button>
                 </div>
             </div>
 
@@ -95,9 +141,25 @@
                 <button class="btn btn-ghost" id="next" type="button">Next</button>
             </div>
         </section>
+
+        <!-- ---------- ZagiRo ---------- -->
+        <section id="zagiro-section" hidden>
+            <div class="toolbar">
+                <div>
+                    <strong>ZagiRo profiles</strong>
+                    <p class="muted small" style="margin:0.25rem 0 0">
+                        Saved bundles of limits and proxy settings. Build one, then apply it to any panels you choose.
+                    </p>
+                </div>
+                <div class="toolbar-right">
+                    <button class="btn btn-accent" id="profile-new" type="button">New profile</button>
+                </div>
+            </div>
+            <div id="profiles" class="panel-grid"></div>
+        </section>
     </main>
 
-    <!-- ---------- edit modal ---------- -->
+    <!-- ---------- panel editor ---------- -->
     <div class="modal" id="edit-modal" hidden>
         <div class="modal-card">
             <button class="modal-close" id="edit-close" type="button">✕</button>
@@ -105,12 +167,7 @@
 
             <div class="plan-row">
                 <span class="muted small">Plan templates</span>
-                <div class="plan-buttons">
-                    <button class="chip-btn" data-plan="30:50:0" type="button">30d · 50GB</button>
-                    <button class="chip-btn" data-plan="30:100:6144" type="button">30d · 100GB · 6MB/s</button>
-                    <button class="chip-btn" data-plan="1:2:0" type="button">Trial 1d · 2GB</button>
-                    <button class="chip-btn" data-plan="0:0:0" type="button">Unlimited</button>
-                </div>
+                <div class="plan-buttons" id="plan-buttons"></div>
             </div>
 
             <div class="field-grid">
@@ -125,13 +182,67 @@
                 <label class="check">Monthly reset<input type="checkbox" id="f-monthly" /></label>
                 <label class="check">Quota alert<input type="checkbox" id="f-alert-quota" /></label>
                 <label class="check">Expiry alert<input type="checkbox" id="f-alert-expiry" /></label>
+                <label class="check">Status notes in client<input type="checkbox" id="f-status-nodes" /></label>
+            </div>
+
+            <div class="quick-row">
+                <span class="muted small">Quick extend</span>
+                <div class="plan-buttons">
+                    <button class="chip-btn" data-extend-days="7" type="button">+7 days</button>
+                    <button class="chip-btn" data-extend-days="30" type="button">+30 days</button>
+                    <button class="chip-btn" data-extend-gb="10" type="button">+10 GB</button>
+                    <button class="chip-btn" data-extend-gb="50" type="button">+50 GB</button>
+                </div>
             </div>
 
             <div class="modal-actions">
                 <button class="btn btn-accent" id="edit-save" type="button">Save limits</button>
                 <button class="btn btn-ghost" id="edit-pause" type="button">Pause</button>
+                <button class="btn btn-ghost" id="edit-update" type="button">Update panel</button>
+                <button class="btn btn-ghost" id="edit-addd1" type="button">Add D1</button>
+                <button class="btn btn-ghost" id="edit-repair" type="button">Repair links</button>
                 <button class="btn btn-ghost" id="edit-reset" type="button">Reset usage</button>
                 <button class="btn btn-danger" id="edit-delete" type="button">Delete panel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---------- profile editor ---------- -->
+    <div class="modal" id="profile-modal" hidden>
+        <div class="modal-card">
+            <button class="modal-close" id="profile-close" type="button">✕</button>
+            <h3 id="profile-title">ZagiRo profile</h3>
+
+            <div class="field-grid">
+                <label>Profile name<input type="text" id="p-name" placeholder="e.g. Gold customer" /></label>
+                <label>Note<input type="text" id="p-note" placeholder="What this profile is for" /></label>
+            </div>
+
+            <h4 class="section-title">Limits carried by this profile</h4>
+            <p class="muted small">Leave a field empty to leave it untouched on the panels you apply this to.</p>
+            <div class="field-grid">
+                <label>Total volume (GB)<input type="number" id="p-total" min="0" step="0.01" /></label>
+                <label>Daily volume (GB)<input type="number" id="p-daily" min="0" step="0.01" /></label>
+                <label>Download cap (KB/s)<input type="number" id="p-down" min="0" step="1" /></label>
+                <label>Upload cap (KB/s)<input type="number" id="p-up" min="0" step="1" /></label>
+                <label>Max devices<input type="number" id="p-devices" min="0" step="1" /></label>
+                <label>Days valid from apply<input type="number" id="p-days" min="0" step="1"
+                        placeholder="e.g. 30" /></label>
+            </div>
+
+            <h4 class="section-title">Proxy settings</h4>
+            <p class="muted small" id="p-settings-state">No proxy settings stored in this profile.</p>
+            <div class="row">
+                <select id="p-source" class="form-select">
+                    <option value="">Copy proxy settings from a panel…</option>
+                </select>
+                <button class="btn btn-ghost" id="p-grab" type="button">Copy</button>
+                <button class="btn btn-ghost" id="p-clear" type="button">Remove</button>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-accent" id="profile-save" type="button">Save profile</button>
+                <button class="btn btn-danger" id="profile-delete" type="button">Delete profile</button>
             </div>
         </div>
     </div>

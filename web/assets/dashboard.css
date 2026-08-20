@@ -461,3 +461,110 @@ input:focus {
         flex-wrap: wrap;
     }
 }
+
+/* ==========================================================================
+   Tabs, bulk bar, account quota, profile editor
+   ========================================================================== */
+
+.tabs {
+    display: flex;
+    gap: 0.35rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.tab {
+    padding: 0.6rem 0.9rem;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.tab.is-active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.quota-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.quota-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.quota-head strong {
+    display: block;
+    font-size: var(--font-size-sm);
+}
+
+.quota-head .muted {
+    display: block;
+    margin-top: 0.2rem;
+    max-width: 60ch;
+}
+
+.bulkbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.9rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+}
+
+.bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.check-inline {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+}
+
+.check-inline input {
+    margin-top: 0.15rem;
+    flex: none;
+}
+
+.form-select {
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-item);
+    background: var(--field);
+    color: var(--text);
+    font-size: var(--font-size-sm);
+}
+
+.section-title {
+    margin: 1.25rem 0 0.35rem;
+    font-size: var(--font-size-sm);
+}
+
+.quick-row {
+    margin-top: 1rem;
+}
+
+.quick-row .plan-buttons {
+    margin-top: 0.4rem;
+}
+
+.panel-card-head .check-inline strong {
+    display: block;
+}

@@ -1,86 +1,92 @@
 /**
  * ZAGROOO Wizard — local server.
  *
- * api.cloudflare.com sends no Access-Control-Allow-Origin header on
- * token-authenticated requests, so a page opened straight from disk cannot
- * call it: the browser blocks the preflight. This server is the fix. It
- * serves local.html and proxies /cf/* to the Cloudflare API, which makes the
- * calls same-origin from the browser's point of view.
+ * Serves dist/local.html and the same /api/manage/* endpoints the hosted
+ * wizard exposes, running the identical bundled logic from dist/manage.mjs.
+ * That means the local edition can never quietly fall behind the hosted one.
  *
- * Zero dependencies, binds to 127.0.0.1 only, stores nothing. The token goes
- * browser -> this process -> Cloudflare and is never written to disk.
+ * A browser cannot call api.cloudflare.com directly — it sends no
+ * Access-Control-Allow-Origin header on token-authenticated requests — so the
+ * work happens here instead.
+ *
+ * Zero runtime dependencies, binds to 127.0.0.1 only, stores nothing. The
+ * token goes browser -> this process -> Cloudflare and is never written to disk.
  *
  *   node scripts/local-server.mjs [port]
  */
 import { createServer } from 'http';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { dirname as pathDirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = pathDirname(fileURLToPath(import.meta.url));
 const PAGE = join(__dirname, '../dist/local.html');
-const UPSTREAM = 'https://api.cloudflare.com/client/v4';
+const BUNDLE = join(__dirname, '../dist/manage.mjs');
 const PORT = Number(process.argv[2]) || 8787;
 
-/** Headers worth forwarding upstream. Everything else is browser noise. */
-const FORWARD = ['authorization', 'content-type'];
+if (!existsSync(PAGE) || !existsSync(BUNDLE)) {
+    console.error('\n  dist/ is missing. Build it first:\n\n    npm run build-local\n');
+    process.exit(1);
+}
+
+const { handleManage } = await import(`file://${BUNDLE.replace(/\\/g, '/')}`);
 
 function readBody(req) {
     return new Promise((resolve, reject) => {
         const chunks = [];
         req.on('data', chunk => chunks.push(chunk));
-        req.on('end', () => resolve(Buffer.concat(chunks)));
+        req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
         req.on('error', reject);
     });
+}
+
+function sendJson(res, status, payload) {
+    const body = JSON.stringify(payload);
+    res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+    });
+    res.end(body);
 }
 
 const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === '/' || url.pathname === '/local.html') {
-        let page;
-        try {
-            page = readFileSync(PAGE, 'utf8');
-        } catch (error) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('local.html is missing. Run: npm run build-local');
-            return;
-        }
-
         res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-store'
         });
-        res.end(page);
+        res.end(readFileSync(PAGE, 'utf8'));
         return;
     }
 
-    if (url.pathname.startsWith('/cf/')) {
-        const target = `${UPSTREAM}/${url.pathname.slice(4)}${url.search}`;
-
-        const headers = {};
-        for (const name of FORWARD) {
-            if (req.headers[name]) headers[name] = req.headers[name];
+    if (url.pathname.startsWith('/api/manage/')) {
+        if (req.method !== 'POST') {
+            sendJson(res, 405, { success: false, message: 'Method not allowed.' });
+            return;
         }
 
-        const body = ['GET', 'HEAD'].includes(req.method) ? undefined : await readBody(req);
+        const action = url.pathname.replace('/api/manage/', '');
 
+        let body = {};
         try {
-            const upstream = await fetch(target, { method: req.method, headers, body });
-            const payload = Buffer.from(await upstream.arrayBuffer());
-
-            res.writeHead(upstream.status, {
-                'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
-                'Cache-Control': 'no-store'
-            });
-            res.end(payload);
+            body = JSON.parse(await readBody(req) || '{}');
         } catch (error) {
-            res.writeHead(502, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                success: false,
-                errors: [{ message: `Could not reach Cloudflare: ${error.message}` }]
-            }));
+            sendJson(res, 400, { success: false, message: 'Invalid JSON body.' });
+            return;
         }
+
+        // Private install links are encrypted with the hosted worker's secret,
+        // which this process does not have.
+        const result = await handleManage(action, body, async payload => {
+            if (payload.key) {
+                throw new Error('Private install links only work in the hosted wizard. Paste an API token here instead.');
+            }
+            return payload.token ?? '';
+        });
+
+        sendJson(res, result.status, result.payload);
         return;
     }
 

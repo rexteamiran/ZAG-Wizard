@@ -1,6 +1,6 @@
 {
     "name": "zagrooo-wizard",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "ZAGROOO Wizard \u2014 install and manage ZAGROOO panels",
     "main": "public/index.js",
     "repository": {
@@ -17,6 +17,7 @@
     "homepage": "https://github.com/rexteamiran/ZAG-Wizard#readme",
     "devDependencies": {
         "@cloudflare/workers-types": "^5.20260716.1",
+        "esbuild": "^0.28.2",
         "typescript": "^7.0.2",
         "wrangler": "^4.0.0"
     },

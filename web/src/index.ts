@@ -3,7 +3,8 @@ import { decrypt, encrypt } from "./encryption";
 import { randSubdomain } from "./random";
 import { buildScript } from "./script";
 import { createStreamLogger, StreamLogger } from "./logger";
-import { PanelManager, PanelSummary } from "./manage";
+import { handleManage as handleManageRequest, ManageRequest } from "./handle-manage";
+import { seedPanelRecord } from "./seed";
 
 interface Env {
     SECRET: string;
@@ -30,6 +31,7 @@ export default {
                     const formData = await request.formData();
                     const apiToken = key ? await decrypt(key, env.SECRET) : formData.get('apiToken')?.toString().trim() ?? '';
                     const deployType = formData.get('deployType')?.toString() || 'workers';
+                    const displayName = formData.get('displayName')?.toString().trim().slice(0, 64) ?? '';
                     const account = await CFAccount.create(apiToken);
 
                     let workerName: string;
@@ -52,9 +54,9 @@ export default {
                     }
 
                     if (deployType === 'pages') {
-                        await deployPages(env, account, workerName, namespaceId, databaseId, logger, preRelease);
+                        await deployPages(env, account, workerName, namespaceId, databaseId, logger, preRelease, displayName);
                     } else {
-                        await deployWorkers(env, account, workerName, namespaceId, databaseId, logger, preRelease);
+                        await deployWorkers(env, account, workerName, namespaceId, databaseId, logger, preRelease, displayName);
                     }
                 } catch (err) {
                     error(`Failed to install ZAGROOO Panel: ${err}`);
@@ -100,8 +102,9 @@ async function deployPages(
     databaseId: string,
     logger: StreamLogger,
     preRelease: boolean,
+    displayName: string,
 ) {
-    const { success, complete } = logger;
+    const { success, error, complete } = logger;
 
     const { script, path } = await buildScript(account, workerName, 'pages.dev', '_worker.js', preRelease);
     success('Script built successfully!');
@@ -112,9 +115,26 @@ async function deployPages(
     await account.deployPages(workerName, script);
     success('Pages deployed successfully!');
 
+    // Write the panel's record now, so it is manageable from the dashboard
+    // before anyone opens it, and its links are known without guesswork.
+    let portal = '';
+    try {
+        const record = await seedPanelRecord(account.token, account.id, namespaceId, databaseId, {
+            displayName,
+            panelHost: subdomain,
+            panelPath: path
+        });
+        portal = `https://${subdomain}/${path}/sub/${record.subToken}`;
+        success('Panel record created!');
+    } catch (err) {
+        error(`Could not write the panel record: ${err}`);
+    }
+
     const url = new URL(`https://${subdomain}/${path}/panel`);
     const payload = {
         url: url.href,
+        portal,
+        name: displayName,
         user: account.email,
         key: await encrypt(account.token, env.SECRET)
     }
@@ -129,9 +149,10 @@ async function deployWorkers(
     namespaceId: string,
     databaseId: string,
     logger: StreamLogger,
-    preRelease: boolean
+    preRelease: boolean,
+    displayName: string
 ) {
-    const { success, complete } = logger;
+    const { success, error, complete } = logger;
     let subdomain: string;
     try {
         subdomain = await account.getWorkersDevSubdomain();
@@ -150,9 +171,26 @@ async function deployWorkers(
     await account.enableSubdomain(workerName);
     success('Worker subdomain enabled successfully!');
 
-    const url = new URL(`https://${workerName}.${subdomain}/${path}/panel`);
+    const host = `${workerName}.${subdomain}`;
+
+    let portal = '';
+    try {
+        const record = await seedPanelRecord(account.token, account.id, namespaceId, databaseId, {
+            displayName,
+            panelHost: host,
+            panelPath: path
+        });
+        portal = `https://${host}/${path}/sub/${record.subToken}`;
+        success('Panel record created!');
+    } catch (err) {
+        error(`Could not write the panel record: ${err}`);
+    }
+
+    const url = new URL(`https://${host}/${path}/panel`);
     const payload = {
         url: url.href,
+        portal,
+        name: displayName,
         user: account.email,
         key: await encrypt(account.token, env.SECRET)
     }
@@ -163,21 +201,11 @@ async function deployWorkers(
 /* ==========================================================================
    Panel management API
 
-   Every call carries the Cloudflare token: either the `key` the wizard handed
-   out at install time (encrypted with env.SECRET, so it never travels in the
-   clear) or a raw token typed into the dashboard. The token is used for that
-   request only and is never stored server side.
+   The request handling lives in handle-manage.ts so the local edition runs
+   exactly the same code. This layer only supplies the token: either the
+   `key` handed out at install time (encrypted with env.SECRET so it never
+   travels in the clear) or a token typed into the dashboard.
    ========================================================================== */
-
-interface ManageRequest {
-    key?: string;
-    token?: string;
-    panel?: PanelSummary;
-    patch?: Record<string, unknown>;
-    reason?: string;
-    scope?: 'all' | 'daily';
-    paused?: boolean;
-}
 
 async function handleManage(request: Request, env: Env, url: URL): Promise<Response> {
     if (request.method !== 'POST') {
@@ -185,67 +213,13 @@ async function handleManage(request: Request, env: Env, url: URL): Promise<Respo
     }
 
     const action = url.pathname.replace('/api/manage/', '');
+    const body = await request.json().catch(() => ({})) as ManageRequest;
 
-    try {
-        const body = await request.json() as ManageRequest;
-        const token = body.key ? await decrypt(body.key, env.SECRET) : (body.token ?? '').trim();
-        if (!token) {
-            return json({ success: false, message: 'Missing Cloudflare API token.' }, 401);
-        }
+    const result = await handleManageRequest(action, body, async payload =>
+        payload.key ? await decrypt(payload.key, env.SECRET) : (payload.token ?? '')
+    );
 
-        const account = await CFAccount.create(token);
-        const manager = new PanelManager(token, account.id);
-
-        switch (action) {
-            case 'account':
-                return json({ success: true, body: { email: account.email, id: account.id } });
-
-            case 'panels':
-                return json({ success: true, body: { panels: await manager.listPanels() } });
-
-            case 'detail': {
-                const panel = requirePanel(body);
-                return json({ success: true, body: await manager.panelDetail(panel) });
-            }
-
-            case 'limits': {
-                const panel = requirePanel(body);
-                const limits = await manager.updateLimits(panel, body.patch ?? {});
-                return json({ success: true, message: 'Limits updated.', body: { limits } });
-            }
-
-            case 'pause': {
-                const panel = requirePanel(body);
-                await manager.setPaused(panel, body.paused !== false, body.reason);
-                return json({ success: true, message: body.paused === false ? 'Panel resumed.' : 'Panel paused.' });
-            }
-
-            case 'reset-usage': {
-                const panel = requirePanel(body);
-                await manager.resetUsage(panel, body.scope === 'daily' ? 'daily' : 'all');
-                return json({ success: true, message: 'Usage reset.' });
-            }
-
-            case 'delete': {
-                const panel = requirePanel(body);
-                await manager.deletePanel(panel);
-                return json({ success: true, message: 'Panel deleted.' });
-            }
-
-            default:
-                return json({ success: false, message: 'Unknown action.' }, 404);
-        }
-    } catch (error) {
-        return json({ success: false, message: String(error instanceof Error ? error.message : error) }, 500);
-    }
-}
-
-function requirePanel(body: ManageRequest): PanelSummary {
-    if (!body.panel?.name || !body.panel?.deployType) {
-        throw new Error('Missing panel reference.');
-    }
-
-    return body.panel;
+    return json(result.payload, result.status);
 }
 
 function json(payload: unknown, status = 200): Response {
