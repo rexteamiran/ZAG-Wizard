@@ -279,8 +279,9 @@ export class PanelManager {
 
     async updateLimits(summary: PanelSummary, patch: Record<string, unknown>): Promise<Record<string, any>> {
         const binding = await this.bindingsOf(summary.name, summary.deployType);
-        const current = await this.storeGet(binding, 'limits');
-        if (!current) throw new Error('This panel has not been opened yet, so it has no limits record.');
+        // Seed the record when the panel has never run, so a freshly installed
+        // panel is configurable straight away.
+        const current = (await this.storeGet(binding, 'limits')) ?? defaultLimits();
 
         const next = { ...current, ...sanitiseLimits(patch) };
 
@@ -298,8 +299,7 @@ export class PanelManager {
 
     async setPaused(summary: PanelSummary, paused: boolean, reason = 'Paused from the wizard.'): Promise<void> {
         const binding = await this.bindingsOf(summary.name, summary.deployType);
-        const current = await this.storeGet(binding, 'limits');
-        if (!current) throw new Error('This panel has no limits record yet.');
+        const current = (await this.storeGet(binding, 'limits')) ?? defaultLimits();
 
         await this.storePut(binding, 'limits', {
             ...current,
@@ -342,6 +342,40 @@ export class PanelManager {
 /* ==========================================================================
    Helpers
    ========================================================================== */
+
+/**
+ * The panel writes its own limits record the first time it runs. A panel that
+ * has just been installed and never opened has none, and the whole point of
+ * this wizard is that a panel never has to be opened by hand -- so the wizard
+ * seeds the record itself, matching src/settings/usage.ts defaultLimits().
+ */
+function randomToken(bytes = 16): string {
+    const buffer = new Uint8Array(bytes);
+    crypto.getRandomValues(buffer);
+    return Array.from(buffer, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export function defaultLimits(): Record<string, any> {
+    return {
+        displayName: '',
+        subToken: randomToken(),
+        limitTotalBytes: 0,
+        limitDailyBytes: 0,
+        downSpeedKbps: 0,
+        upSpeedKbps: 0,
+        expireAt: 0,
+        maxDevices: 0,
+        isPaused: false,
+        pauseReason: '',
+        pausedAt: 0,
+        monthlyReset: false,
+        monthlyResetDay: 1,
+        alertQuota: false,
+        alertExpiry: false,
+        alertState: { quota80: false, quota100: false, expirySoon: false },
+        panelApiKeys: []
+    };
+}
 
 export function describeStatus(limits: any, usage: any): string {
     if (!limits) return 'unknown';

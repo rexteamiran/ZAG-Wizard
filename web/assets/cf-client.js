@@ -205,6 +205,39 @@
         }
     }
 
+    /* ------------------------------------------------------------ defaults */
+
+    // A panel writes its own limits record the first time it runs. One that was
+    // just installed and never opened has none, so the wizard seeds it, matching
+    // the panel's own defaultLimits().
+    function randomToken(bytes) {
+        var buffer = new Uint8Array(bytes || 16);
+        crypto.getRandomValues(buffer);
+        return Array.from(buffer, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+
+    function defaultLimits() {
+        return {
+            displayName: '',
+            subToken: randomToken(),
+            limitTotalBytes: 0,
+            limitDailyBytes: 0,
+            downSpeedKbps: 0,
+            upSpeedKbps: 0,
+            expireAt: 0,
+            maxDevices: 0,
+            isPaused: false,
+            pauseReason: '',
+            pausedAt: 0,
+            monthlyReset: false,
+            monthlyResetDay: 1,
+            alertQuota: false,
+            alertExpiry: false,
+            alertState: { quota80: false, quota100: false, expirySoon: false },
+            panelApiKeys: []
+        };
+    }
+
     function describeStatus(limits, usage) {
         if (!limits) return 'unknown';
         if (limits.isPaused) return 'paused';
@@ -277,8 +310,7 @@
 
     async function updateLimits(panel, patch) {
         const binding = await bindingsOf(panel);
-        const current = await storeGet(binding, 'limits');
-        if (!current) throw new Error('This panel has not been opened yet, so it has no limits record.');
+        const current = (await storeGet(binding, 'limits')) || defaultLimits();
 
         const next = { ...current, ...sanitise(patch) };
         const usage = await storeGet(binding, 'usage');
@@ -297,8 +329,7 @@
 
     async function setPaused(panel, paused, reason) {
         const binding = await bindingsOf(panel);
-        const current = await storeGet(binding, 'limits');
-        if (!current) throw new Error('This panel has no limits record yet.');
+        const current = (await storeGet(binding, 'limits')) || defaultLimits();
 
         await storePut(binding, 'limits', {
             ...current,

@@ -41,11 +41,14 @@ export default {
                     const namespaceId = await account.createKvNamespace(workerName, deployType);
                     success('KV namespace created successfully!');
 
-                    const databaseId = await account.createD1Database(workerName);
+                    const d1 = await account.createD1Database(workerName);
+                    const databaseId = d1.id;
                     if (databaseId) {
                         success('D1 database created successfully!');
                     } else {
-                        info('D1 unavailable, falling back to KV accounting.');
+                        error(`D1 not created: ${d1.error}`);
+                        info('Falling back to KV accounting (1000 writes/day on the free plan).');
+                        info('Fix the token permission and reinstall to get D1.');
                     }
 
                     if (deployType === 'pages') {

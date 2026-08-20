@@ -53,17 +53,28 @@ export class CFAccount {
      * `zag_db`. Returns an empty string when D1 is unavailable, which makes
      * the panel fall back to buffered KV accounting.
      */
-    async createD1Database(workerName: string): Promise<string> {
+    async createD1Database(workerName: string): Promise<{ id: string; error: string }> {
         try {
             const database = await this.client.d1.database.create({
                 account_id: this.id,
                 name: `${workerName}-zagrooo`
             });
 
-            return database.uuid ?? '';
-        } catch (error) {
-            console.log('D1 unavailable, falling back to KV accounting:', error);
-            return '';
+            const id = database.uuid ?? '';
+            return id
+                ? { id, error: '' }
+                : { id: '', error: 'Cloudflare returned no database id.' };
+        } catch (error: any) {
+            // Report why, rather than a bare "unavailable". Almost always this
+            // is an API token created without the D1 Edit permission.
+            const detail = error?.errors?.[0]?.message ?? error?.message ?? String(error);
+            const status = error?.status ?? error?.statusCode;
+
+            const hint = (status === 403 || status === 401 || /permission|authoriz|denied/i.test(detail))
+                ? 'Your API token is missing the D1:Edit permission.'
+                : detail;
+
+            return { id: '', error: hint };
         }
     }
 
