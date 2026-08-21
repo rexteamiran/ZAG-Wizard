@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
         { key: 'd1', type: 'edit' },
         { key: 'page', type: 'edit' },
         { key: 'dns', type: 'edit' },
+        // The dashboard's account request-quota bar reads Workers analytics.
+        // Without this the query is denied and the bar reads a reassuring 0%.
+        { key: 'account_analytics', type: 'read' },
         { key: 'user_details', type: 'read' }
     ];
 
@@ -44,7 +47,10 @@ copyURL.addEventListener('click', () => {
     const url = new URL(window.location.href);
     url.searchParams.set('user', user);
     url.searchParams.set('key', key);
-    navigator.clipboard.writeText(url.href);
+    if (!globalThis.key || !globalThis.user) return;
+
+    navigator.clipboard.writeText(url.href)
+        .catch(() => log('error', 'Could not copy the private link.'));
 });
 
 togglePass.addEventListener('click', () => {
@@ -140,7 +146,10 @@ async function startDeploymentPipeline(payload) {
             }
         }
     } catch (err) {
-        log('Fatal execution termination: ' + err.message);
+        // log(type, message) — passing the sentence as the type made
+        // LABEL_GLYPHS[type] undefined, which threw inside this catch and left
+        // the operator staring at an empty terminal after a failed install.
+        log('error', 'Installation failed: ' + (err && err.message ? err.message : err));
     }
 }
 

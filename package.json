@@ -1,6 +1,6 @@
 {
     "name": "zagrooo-wizard",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "ZAGROOO Wizard \u2014 install and manage ZAGROOO panels",
     "main": "public/index.js",
     "repository": {
@@ -29,6 +29,7 @@
         "check": "tsc --noEmit",
         "local": "node scripts/build-local.js && node scripts/local-server.mjs",
         "dev": "wrangler dev",
-        "deploy": "wrangler deploy"
+        "deploy": "wrangler deploy",
+        "test": "node --test tests/*.test.mjs"
     }
 }

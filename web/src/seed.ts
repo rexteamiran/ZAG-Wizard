@@ -68,6 +68,7 @@ export function defaultLimits(seed: Partial<PanelSeed> = {}): Record<string, any
         isPaused: false,
         pauseReason: '',
         pausedAt: 0,
+        pausedBy: '',
         monthlyReset: false,
         monthlyResetDay: 1,
         alertQuota: false,

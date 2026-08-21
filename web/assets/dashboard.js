@@ -133,7 +133,14 @@ async function loadAccountUsage() {
         pill.textContent = `${pct.toFixed(1)}%`;
         pill.className = pct >= 90 ? 'pill is-danger' : pct >= 70 ? 'pill is-warn' : 'pill';
     } catch (error) {
-        $('quota-text').textContent = `Could not read account usage: ${error.message || error}`;
+        // An unknown quota is not a safe quota — say so rather than leaving an
+        // empty bar that reads as healthy.
+        $('quota-bar').style.width = '0%';
+        $('quota-text').textContent = `Account usage unknown — ${error.message || error}`;
+
+        const pill = $('quota-pill');
+        pill.textContent = 'unknown';
+        pill.className = 'pill is-warn';
     }
 }
 
@@ -197,6 +204,13 @@ function applyFilter() {
         : panels;
 
     filtered = sortPanels(matches);
+
+    // Selection used to survive filtering while selectedPanels() resolved
+    // against the unfiltered list, so a bulk action could hit panels the
+    // operator could not see. Keep only what is still in view.
+    const visible = new Set(filtered.map(cardId));
+    selected = new Set([...selected].filter(id => visible.has(id)));
+
     page = 0;
     renderPage();
 }
@@ -325,9 +339,12 @@ function paintDetail(panel, detail) {
 /* ------------------------------------------------------------- selection */
 
 function updateSelectionUi() {
-    $('selected-count').textContent = `${selected.size} selected`;
-    const boxes = document.querySelectorAll('.select-panel');
-    $('select-all').checked = boxes.length > 0 && [...boxes].every(box => box.checked);
+    const total = filtered.length;
+    $('selected-count').textContent = selected.size === total && total > 0
+        ? `all ${total} selected`
+        : `${selected.size} selected`;
+
+    $('select-all').checked = total > 0 && selected.size === total;
 }
 
 document.addEventListener('change', event => {
@@ -339,16 +356,27 @@ document.addEventListener('change', event => {
     }
 
     if (event.target.id === 'select-all') {
+        // Everything matching the current filter, not just the current page —
+        // otherwise the count and the checkbox disagree across pages.
+        if (event.target.checked) {
+            filtered.forEach(panel => selected.add(cardId(panel)));
+        } else {
+            selected.clear();
+        }
+
         document.querySelectorAll('.select-panel').forEach(box => {
             box.checked = event.target.checked;
-            if (box.checked) selected.add(box.dataset.id); else selected.delete(box.dataset.id);
         });
+
         updateSelectionUi();
     }
 });
 
 function selectedPanels() {
-    return [...selected].map(panelOfId).filter(Boolean);
+    // Resolve against the filtered list, so a bulk action can only ever touch
+    // panels the operator can actually see.
+    const visible = new Map(filtered.map(panel => [cardId(panel), panel]));
+    return [...selected].map(id => visible.get(id)).filter(Boolean);
 }
 
 /* --------------------------------------------------------------- actions */
@@ -812,31 +840,77 @@ function profileForApply(profile) {
 /* ----------------------------------------------------------------- export */
 
 $('export').addEventListener('click', async () => {
+    const button = $('export');
+    const original = button.textContent;
+
+    // Details load lazily, one page at a time. Exporting `filtered` without
+    // fetching the rest produced blank rows for every panel off the current
+    // page while the toast reported them all as exported.
+    const missing = filtered.filter(panel => !details.has(cardId(panel)));
+
+    if (missing.length) {
+        button.textContent = `Loading ${missing.length}…`;
+        button.disabled = true;
+
+        for (const panel of missing) {
+            try {
+                details.set(cardId(panel), await manage('detail', { panel }));
+            } catch (error) {
+                // Recorded below as an incomplete row rather than a silent gap.
+            }
+        }
+
+        button.textContent = original;
+        button.disabled = false;
+    }
+
     const rows = [['name', 'display name', 'status', 'used bytes', 'quota bytes', 'expires', 'portal']];
+    let incomplete = 0;
 
     filtered.forEach(panel => {
-        const detail = details.get(cardId(panel)) || {};
-        const limits = detail.limits || {};
-        const usage = detail.usage || {};
+        const detail = details.get(cardId(panel));
+        if (!detail) incomplete++;
+
+        const limits = (detail || {}).limits || {};
+        const usage = (detail || {}).usage || {};
 
         rows.push([
             panel.name,
             limits.displayName || '',
-            detail.status || '',
+            (detail || {}).status || 'unknown',
             String(usage.totalBytes || 0),
             String(limits.limitTotalBytes || 0),
             limits.expireAt ? new Date(limits.expireAt).toISOString().split('T')[0] : '',
-            detail.portalUrl || ''
+            (detail || {}).portalUrl || ''
         ]);
     });
 
     const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
 
+    // Actually download it; the button says Export, not Copy.
     try {
-        await navigator.clipboard.writeText(csv);
-        toast(`${rows.length - 1} rows copied as CSV — paste into a spreadsheet.`);
+        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = `zagrooo-panels-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+        toast(incomplete
+            ? `Exported ${rows.length - 1} rows — ${incomplete} could not be read.`
+            : `Exported ${rows.length - 1} rows.`);
     } catch (error) {
-        toast('Could not copy the CSV.');
+        // Some embedded viewers block page-initiated downloads.
+        try {
+            await navigator.clipboard.writeText(csv);
+            toast(`Download blocked — ${rows.length - 1} rows copied instead.`);
+        } catch (copyError) {
+            toast('Could not export the CSV.');
+        }
     }
 });
 

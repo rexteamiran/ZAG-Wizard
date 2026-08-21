@@ -75,7 +75,7 @@ const banner = `<!--
   Cloudflare and is never written to disk.
 
   Use a token scoped to Workers Scripts Edit, Workers KV Storage Edit, D1 Edit,
-  Pages Edit, Account Settings Read and User Details Read. Never a Global API Key.
+  Pages Edit, Account Analytics Read and User Details Read. Never a Global API Key.
 -->
 `;
 

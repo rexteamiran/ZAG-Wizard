@@ -12,6 +12,7 @@
    ========================================================================== */
 
 import { defaultLimits, wizardKeyPair } from './seed';
+import { parseEmbeddedSettings } from './embedded';
 
 const API = 'https://api.cloudflare.com/client/v4';
 
@@ -26,6 +27,8 @@ export interface PanelSummary {
     modifiedOn: string;
     hasKv: boolean;
     hasD1: boolean;
+    /** False when Cloudflare would not tell us this script's bindings. */
+    readable?: boolean;
 }
 
 export interface PanelDetail extends PanelSummary {
@@ -76,18 +79,37 @@ export class PanelManager {
             this.call<any[]>('/pages/projects').catch(() => [])
         ]);
 
+        // One settings lookup per script. A 429 here used to be swallowed to
+        // [], which reported the panel as having no KV binding and dropped it
+        // from the list silently — the operator just saw a shorter list.
+        const failures: string[] = [];
+
         const workers = await Promise.all(
             (scripts ?? []).map(async script => {
-                const bindings = await this.workerBindings(script.id).catch(() => []);
+                let bindings: any[] = [];
+                let readable = true;
+
+                try {
+                    bindings = await this.workerBindings(script.id);
+                } catch (error) {
+                    readable = false;
+                    failures.push(script.id);
+                }
+
                 return {
                     name: script.id,
                     deployType: 'workers' as const,
                     modifiedOn: script.modified_on ?? '',
                     hasKv: bindings.some(b => b.name === 'kv'),
-                    hasD1: bindings.some(b => b.name === 'zag_db')
+                    hasD1: bindings.some(b => b.name === 'zag_db'),
+                    readable
                 };
             })
         );
+
+        if (failures.length) {
+            console.log(`Could not read bindings for: ${failures.join(', ')}`);
+        }
 
         const pages = (projects ?? []).map(project => {
             const config = project.deployment_configs?.production ?? {};
@@ -96,13 +118,15 @@ export class PanelManager {
                 deployType: 'pages' as const,
                 modifiedOn: project.latest_deployment?.modified_on ?? project.created_on ?? '',
                 hasKv: Boolean(config.kv_namespaces?.kv),
-                hasD1: Boolean(config.d1_databases?.zag_db)
+                hasD1: Boolean(config.d1_databases?.zag_db),
+                readable: true
             };
         });
 
         // A `kv` binding is what makes something a ZAGROOO panel rather than
-        // some other worker on the same account.
-        return [...workers, ...pages].filter(panel => panel.hasKv);
+        // some other worker. A script whose bindings could not be read is kept
+        // and flagged, rather than disappearing as though it did not exist.
+        return [...workers, ...pages].filter(panel => panel.hasKv || !panel.readable);
     }
 
     private async workerBindings(name: string): Promise<any[]> {
@@ -224,15 +248,7 @@ export class PanelManager {
         });
 
         if (!res.ok) return {};
-        const source = await res.text();
-        const match = source.match(/EMBEDED_SETTINGS\s*=\s*(\{.*?\});/s);
-        if (!match) return {};
-
-        try {
-            return JSON.parse(match[1]);
-        } catch (error) {
-            return {};
-        }
+        return parseEmbeddedSettings(await res.text());
     }
 
     async panelDetail(summary: PanelSummary): Promise<PanelDetail> {
@@ -256,6 +272,12 @@ export class PanelManager {
                 this.storeGet(binding, 'usage')
             ]);
 
+            // Report what the account actually has, not what the caller sent.
+            // Echoing the client's value left "Add D1" on screen after D1 was
+            // attached, and the card still reading "KV" until a full refresh.
+            base.hasD1 = Boolean(binding.d1DatabaseId);
+            base.hasKv = Boolean(binding.kvNamespaceId);
+
             // The wizard records these at install time. Parsing the deployed
             // script is only a fallback for panels installed before that, and
             // it is exactly the step that used to fail and blank the links.
@@ -264,6 +286,8 @@ export class PanelManager {
 
             return {
                 ...base,
+                hasD1: base.hasD1,
+                hasKv: base.hasKv,
                 host,
                 securePath,
                 uuid: settings.vlUUID ?? '',
@@ -290,11 +314,20 @@ export class PanelManager {
 
         const next = { ...current, ...sanitiseLimits(patch) };
 
-        // Raising a limit should revive a panel that was paused by hitting it.
-        if (next.isPaused && patch.isPaused === undefined && describeStatus(next, await this.storeGet(binding, 'usage')) === 'active') {
-            next.isPaused = false;
-            next.pauseReason = '';
-            next.pausedAt = 0;
+        // Raising a limit should revive a panel that paused itself on hitting
+        // it. describeStatus reports 'paused' whenever isPaused is set, so
+        // asking it about `next` directly could only ever answer 'paused' —
+        // the branch never ran and topped-up customers stayed dead. Ask what
+        // the status would be with the pause lifted instead.
+        const autoPaused = next.isPaused && next.pausedBy && next.pausedBy !== 'manual';
+        if (autoPaused && patch.isPaused === undefined) {
+            const usage = await this.storeGet(binding, 'usage');
+            if (describeStatus({ ...next, isPaused: false }, usage) === 'active') {
+                next.isPaused = false;
+                next.pauseReason = '';
+                next.pausedBy = '';
+                next.pausedAt = 0;
+            }
         }
 
         next.alertState = { quota80: false, quota100: false, expirySoon: false };
@@ -344,8 +377,11 @@ export class PanelManager {
         const settings = await this.embeddedSettings(summary.name, summary.deployType);
         const limits = (await this.storeGet(binding, 'limits')) ?? defaultLimits();
 
-        let host = settings.mainDomain ?? limits.panelHost ?? '';
-        const securePath = settings.securePath ?? limits.panelPath ?? '';
+        // `??` keeps an empty string, and Pages reports mainDomain as '' when
+        // the project has no subdomain — so repair threw even when the address
+        // had been recorded correctly at install. panelDetail already uses `||`.
+        let host = limits.panelHost || settings.mainDomain || '';
+        const securePath = limits.panelPath || settings.securePath || '';
 
         // Pages reports only the project subdomain; workers need the account's
         // workers.dev subdomain prepended with the script name.
@@ -407,8 +443,8 @@ export class PanelManager {
             }
         }
 
-        // Record which profile this panel now carries, even when only settings
-        // were applied, so the dashboard can label it.
+        // updateLimits already carries zagiroName when the profile had limits;
+        // this covers a settings-only profile.
         if (profile.name && report.limits === 'skipped') {
             const binding = await this.bindingsOf(summary.name, summary.deployType);
             const current = (await this.storeGet(binding, 'limits')) ?? defaultLimits();
@@ -503,6 +539,24 @@ export class PanelManager {
         const binding = await this.bindingsOf(summary.name, summary.deployType);
         if (binding.d1DatabaseId) return binding.d1DatabaseId;
 
+        // Everything that can fail happens before anything is created, so a
+        // failed attempt cannot leave an orphan database behind.
+        const res = await fetch(
+            `${API}/accounts/${this.accountId}/workers/scripts/${encodeURIComponent(summary.name)}/content`,
+            { headers: { 'Authorization': `Bearer ${this.token}` } }
+        );
+
+        if (!res.ok) {
+            // Without this check a Cloudflare error page would be uploaded as
+            // the worker, replacing a live panel with something that is not one.
+            throw new Error(`Could not download the current panel script: HTTP ${res.status}`);
+        }
+
+        const current = await res.text();
+        if (!parseEmbeddedSettings(current).securePath) {
+            throw new Error('Could not read this panel\'s identity, so it cannot be safely redeployed.');
+        }
+
         const database = await this.call<any>('/d1/database', {
             method: 'POST',
             body: JSON.stringify({ name: `${summary.name}-zagrooo` })
@@ -511,37 +565,60 @@ export class PanelManager {
         const databaseId = database?.uuid;
         if (!databaseId) throw new Error('Cloudflare did not return a database id.');
 
-        // A binding only takes effect on redeploy, so the current script is
-        // re-uploaded with the new binding attached.
-        const settings = await this.embeddedSettings(summary.name, summary.deployType);
-        if (!settings.securePath) {
-            throw new Error('Could not read this panel\'s identity, so it cannot be safely redeployed.');
-        }
-
-        const res = await fetch(
-            `${API}/accounts/${this.accountId}/workers/scripts/${encodeURIComponent(summary.name)}/content`,
-            { headers: { 'Authorization': `Bearer ${this.token}` } }
-        );
-        const current = await res.text();
-
+        // A binding only takes effect on redeploy.
         await this.uploadWorker(summary.name, current, { ...binding, d1DatabaseId: databaseId });
         return databaseId;
     }
 
+    /**
+     * Redeploys a worker, preserving everything about it except the code.
+     *
+     * `PUT /workers/scripts/{name}` replaces the whole script configuration,
+     * so anything omitted is destroyed. Rebuilding the metadata from scratch
+     * therefore wiped secrets, plain-text vars, any binding beyond the two the
+     * wizard knows about, and silently bumped the compatibility date to today
+     * — changing runtime semantics under a panel that was working.
+     *
+     * So the current settings are read first and used as the base.
+     */
     private async uploadWorker(name: string, script: string, binding: PanelBinding): Promise<void> {
-        const bindings: Record<string, string>[] = [
-            { type: 'kv_namespace', name: 'kv', namespace_id: binding.kvNamespaceId }
-        ];
+        const existing = await this.call<any>(
+            `/workers/scripts/${encodeURIComponent(name)}/settings`
+        ).catch(() => null);
 
+        const keep: any[] = (existing?.bindings ?? []).filter(
+            (b: any) => b?.name !== 'kv' && b?.name !== 'zag_db'
+        );
+
+        // Secrets read back with no value and must be carried by reference, or
+        // the redeploy would blank them.
+        const bindings: any[] = keep.map(b =>
+            b.type === 'secret_text' ? { type: 'inherit', name: b.name } : b
+        );
+
+        bindings.push({ type: 'kv_namespace', name: 'kv', namespace_id: binding.kvNamespaceId });
         if (binding.d1DatabaseId) {
             bindings.push({ type: 'd1', name: 'zag_db', id: binding.d1DatabaseId });
         }
 
+        const flags: string[] = existing?.compatibility_flags?.length
+            ? existing.compatibility_flags
+            : ['nodejs_compat'];
+
+        if (!flags.includes('nodejs_compat')) flags.push('nodejs_compat');
+
         const metadata = {
             main_module: 'worker.js',
-            compatibility_date: new Date().toISOString().split('T')[0],
-            compatibility_flags: ['nodejs_compat'],
-            bindings
+            // Keep the date the panel was deployed on; changing it changes how
+            // the runtime behaves.
+            compatibility_date: existing?.compatibility_date ?? new Date().toISOString().split('T')[0],
+            compatibility_flags: flags,
+            bindings,
+            ...(existing?.usage_model ? { usage_model: existing.usage_model } : {}),
+            ...(existing?.placement ? { placement: existing.placement } : {}),
+            ...(existing?.limits ? { limits: existing.limits } : {}),
+            ...(existing?.logpush !== undefined ? { logpush: existing.logpush } : {}),
+            ...(existing?.observability ? { observability: existing.observability } : {})
         };
 
         const form = new FormData();
@@ -625,7 +702,13 @@ function sanitiseLimits(patch: Record<string, unknown>): Record<string, unknown>
     }
 
     if (patch.displayName !== undefined) out.displayName = String(patch.displayName).slice(0, 64);
-    for (const flag of ['monthlyReset', 'alertQuota', 'alertExpiry', 'isPaused'] as const) {
+
+    // zagiroName labels the panel with the profile applied; showStatusNodes
+    // drives the in-client notes. Both were dropped here, which made the
+    // dashboard's checkbox inert and left every panel unlabelled.
+    if (patch.zagiroName !== undefined) out.zagiroName = String(patch.zagiroName).slice(0, 60);
+
+    for (const flag of ['monthlyReset', 'alertQuota', 'alertExpiry', 'isPaused', 'showStatusNodes'] as const) {
         if (patch[flag] !== undefined) out[flag] = Boolean(patch[flag]);
     }
 
@@ -671,8 +754,28 @@ export async function accountUsage(token: string, accountId: string): Promise<Ac
         body: JSON.stringify(query)
     });
 
+    if (!res.ok) throw new Error(`Analytics request failed: HTTP ${res.status}`);
+
     const data = await res.json() as any;
-    const rows = data?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? [];
+
+    // GraphQL reports a permission denial as 200 with errors[] and data: null.
+    // Reading only `data` turns that into "0 requests", which is exactly the
+    // reassurance the operator must not be given.
+    if (Array.isArray(data?.errors) && data.errors.length) {
+        const message = data.errors[0]?.message ?? 'unknown error';
+        throw new Error(
+            /permission|denied|unauthor/i.test(message)
+                ? 'Your API token is missing the Account Analytics: Read permission.'
+                : `Analytics query failed: ${message}`
+        );
+    }
+
+    const accounts = data?.data?.viewer?.accounts;
+    if (!Array.isArray(accounts) || !accounts.length) {
+        throw new Error('Analytics returned no data for this account.');
+    }
+
+    const rows = accounts[0]?.workersInvocationsAdaptive ?? [];
     const requests = rows.reduce((sum: number, row: any) => sum + (row?.sum?.requests ?? 0), 0);
 
     return {

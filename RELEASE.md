@@ -2,6 +2,46 @@
 
 Installs and centrally manages ZAGROOO Panel deployments.
 
+## 1.2.0 — correctness
+
+### Fixed: most panels were unmanageable
+
+The wizard read a panel's identity with a pattern that only matched the form it
+writes at install. A panel writes a different form whenever you save anything
+in its own admin UI — so the moment a panel was used at all, the wizard could
+no longer update it, attach D1, or repair its links. Both forms are now
+understood.
+
+### Fixed: the account request bar always read 0%
+
+The quota query needs the Account Analytics permission, which the "create a
+token" link never asked for. A denial comes back as a success with an error
+inside, so the bar showed a reassuring "0 of 100,000" — the one number meant to
+warn you before every panel stops. The permission is now requested, the failure
+is surfaced, and an unknown quota is shown as unknown.
+
+**Re-create your API token from the install page, or add Account Analytics:
+Read to the existing one.**
+
+### Other fixes
+
+- Updating a panel no longer destroys its secrets, variables, extra bindings or
+  compatibility date.
+- Attaching D1 checks the download first, so a Cloudflare error page can never
+  be deployed as your worker, and no longer leaves an orphan database behind
+  when it fails.
+- Raising a limit revives a customer the panel had paused — that branch could
+  never run before.
+- The "Status notes in client" checkbox and the profile label now save.
+- Pages panels can be repaired.
+- A transient error no longer makes a panel vanish from the list.
+- **Export CSV** now actually downloads, and loads every panel's details first
+  instead of exporting blank rows for everything off the current page.
+- Selecting panels then filtering no longer leaves a bulk action pointed at
+  panels you cannot see.
+- A failed install shows the error instead of a blank terminal.
+
+
 ## 1.1.0
 
 ### ZagiRo profiles
