@@ -1,6 +1,6 @@
 {
     "name": "zagrooo-wizard",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "description": "ZAGROOO Wizard \u2014 install and manage ZAGROOO panels",
     "main": "public/index.js",
     "repository": {
