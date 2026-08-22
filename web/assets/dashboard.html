@@ -97,6 +97,7 @@
         <nav class="tabs" id="tabs" hidden>
             <button class="tab is-active" data-tab="panels" type="button">Panels</button>
             <button class="tab" data-tab="zagiro" type="button">ZagiRo profiles</button>
+            <button class="tab" data-tab="templates" type="button">Templates</button>
         </nav>
 
         <!-- ---------- panels ---------- -->
@@ -156,6 +157,31 @@
                 </div>
             </div>
             <div id="profiles" class="panel-grid"></div>
+        </section>
+
+        <!-- ---------- templates ---------- -->
+        <section id="templates-section" hidden>
+            <div class="toolbar">
+                <div>
+                    <strong>Setting templates</strong>
+                    <p class="muted small" style="margin:0.25rem 0 0">
+                        Ready-made configurations. Apply one to the panels you have selected on the
+                        Panels tab, or save it as a ZagiRo profile to attach quotas to it.
+                    </p>
+                </div>
+                <div class="toolbar-right">
+                    <select id="template-family" class="form-select">
+                        <option value="">All families</option>
+                        <option value="network">Network conditions</option>
+                        <option value="performance">Performance</option>
+                        <option value="client">Client-specific</option>
+                        <option value="warp">WARP</option>
+                        <option value="rules">Rules &amp; filtering</option>
+                        <option value="advanced">Advanced</option>
+                    </select>
+                </div>
+            </div>
+            <div id="templates" class="panel-grid"></div>
         </section>
     </main>
 
@@ -249,6 +275,7 @@
 
     <div class="toast" id="toast" hidden></div>
 
+    <script src="templates.js"></script>
     <script src="dashboard.js"></script>
 </body>
 

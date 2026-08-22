@@ -43,6 +43,7 @@ console.log('✔ dist/manage.mjs built');
 const theme = read('theme.css');
 const dashboardCss = read('dashboard.css');
 const dashboardJs = read('dashboard.js');
+const templatesJs = read('templates.js');
 
 let html = read('dashboard.html');
 
@@ -51,6 +52,7 @@ html = html
     .replace('<link rel="icon" href="favicon.ico" />', '')
     .replace('<link href="theme.css" rel="stylesheet" />', `<style>\n${theme}\n</style>`)
     .replace('<link href="dashboard.css" rel="stylesheet" />', `<style>\n${dashboardCss}\n</style>`)
+    .replace('<script src="templates.js"></script>', `<script>\n${templatesJs}\n</script>`)
     .replace('<script src="dashboard.js"></script>', `<script>\n${dashboardJs}\n</script>`)
     // No worker behind this page, so the install flow lives elsewhere and
     // private install links (which only the worker can decrypt) do not apply.

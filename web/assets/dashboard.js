@@ -155,6 +155,7 @@ $('tabs').addEventListener('click', event => {
 
     $('panels-section').hidden = tab.dataset.tab !== 'panels';
     $('zagiro-section').hidden = tab.dataset.tab !== 'zagiro';
+    $('templates-section').hidden = tab.dataset.tab !== 'templates';
 });
 
 /* ---------------------------------------------------------------- listing */
@@ -928,3 +929,106 @@ $('prev').addEventListener('click', () => { if (page > 0) { page--; renderPage()
 $('next').addEventListener('click', () => {
     if ((page + 1) * PAGE_SIZE < filtered.length) { page++; renderPage(); }
 });
+
+/* ==========================================================================
+   Setting templates
+
+   The same library the panel ships, vendored by scripts/sync-templates.mjs so
+   this build never needs the network. A template is shaped exactly like the
+   `settings` half of a ZagiRo profile, so applying one reuses the existing
+   apply-profile path and needs no new backend.
+   ========================================================================== */
+
+const TEMPLATES = window.ZAG_TEMPLATES || [];
+
+function templateName(template) {
+    return (template.name && (template.name.en || template.name.fa)) || template.id;
+}
+
+function templateDescription(template) {
+    return (template.description && (template.description.en || template.description.fa)) || '';
+}
+
+function renderTemplates() {
+    const family = $('template-family').value;
+    const visible = family ? TEMPLATES.filter(t => t.family === family) : TEMPLATES;
+
+    if (!visible.length) {
+        $('templates').innerHTML = '<div class="empty">No templates in this family.</div>';
+        return;
+    }
+
+    $('templates').innerHTML = visible.map(template => `
+        <article class="panel-card">
+            <div class="panel-card-head">
+                <div>
+                    <strong>${escapeHtml(templateName(template))}</strong>
+                    <span class="panel-meta">${escapeHtml(template.family)}</span>
+                </div>
+            </div>
+            <p class="muted small" style="margin:0">${escapeHtml(templateDescription(template))}</p>
+            ${template.warning
+        ? `<p class="muted small" style="margin:0">⚠️ ${escapeHtml(template.warning.en || template.warning.fa)}</p>`
+        : ''}
+            <div class="panel-links">
+                <button type="button" data-apply-template="${template.id}">Apply to selected</button>
+                <button type="button" data-save-template="${template.id}">Save as profile</button>
+            </div>
+        </article>
+    `).join('');
+}
+
+/** Operator-authored text goes through innerHTML, so escape it. */
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+}
+
+$('template-family').addEventListener('change', renderTemplates);
+
+document.addEventListener('click', async event => {
+    const applyBtn = event.target.closest('[data-apply-template]');
+    if (applyBtn) {
+        const template = TEMPLATES.find(t => t.id === applyBtn.dataset.applyTemplate);
+        if (!template) return;
+
+        if (template.warning) {
+            const proceed = confirm(`${templateName(template)}\n\n${template.warning.en || template.warning.fa}\n\nApply anyway?`);
+            if (!proceed) return;
+        }
+
+        // A template carries settings only; limits stay whatever each panel has.
+        bulk(`Apply "${templateName(template)}" to`, panel =>
+            manage('apply-profile', {
+                panel,
+                profile: { name: templateName(template), settings: template.settings, limits: null }
+            }));
+
+        return;
+    }
+
+    const saveBtn = event.target.closest('[data-save-template]');
+    if (saveBtn) {
+        const template = TEMPLATES.find(t => t.id === saveBtn.dataset.saveTemplate);
+        if (!template) return;
+
+        try {
+            await manage('profile-save', {
+                profile: {
+                    name: templateName(template),
+                    note: templateDescription(template).slice(0, 200),
+                    settings: template.settings,
+                    limits: null
+                }
+            });
+
+            toast(`Saved "${templateName(template)}" as a profile — add quotas to it on the ZagiRo tab.`);
+            await loadProfiles();
+        } catch (error) {
+            toast(String(error.message || error));
+        }
+    }
+});
+
+renderTemplates();

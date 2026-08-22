@@ -4,6 +4,15 @@ Installs and centrally manages ZAGROOO Panel deployments.
 
 ## 1.2.0 — correctness
 
+### New: templates
+
+A Templates tab carrying the same twenty-four setups the panel ships. Apply one
+to every panel you have selected, or save it as a ZagiRo profile and attach
+quotas to it.
+
+The list is vendored, so the wizard build never needs the network. Refresh it
+after a panel release with `npm run sync-templates`.
+
 ### Fixed: most panels were unmanageable
 
 The wizard read a panel's identity with a pattern that only matched the form it
