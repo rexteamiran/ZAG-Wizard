@@ -10,20 +10,20 @@ body {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: var(--color-bg-main);
+    background: var(--canvas);
 }
 
 h4 {
-    font-weight: 500;
+    font-weight: 600;
 }
 
 a {
-    color: var(--color-brand-primary);
+    color: var(--accent);
     text-decoration-line: unset;
 }
 
 a:hover {
-    color: var(--color-brand-hover);
+    color: var(--accent-hover);
 }
 
 ol {
@@ -56,19 +56,20 @@ ol {
     align-items: center;
     justify-content: center;
     padding: var(--space-lg);
-    color: var(--color-text-primary);
+    color: var(--text);
 }
 
+/* One card = one concern: the install form is this page's only shell. */
 .card {
     width: 100%;
     max-width: 500px;
     display: flex;
     flex-direction: column;
-    background-color: var(--color-bg-card);
+    background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--radius-card);
     padding: var(--space-xl);
-    box-shadow: var(--shadow-card);
+    box-shadow: var(--shadow-shell);
 }
 
 .card-header-area {
@@ -101,13 +102,12 @@ ol {
     width: 2rem;
     height: 2rem;
     display: flex;
-    filter: var(--shadow-icon);
 }
 
 .subtitle {
     font-size: var(--font-size-sm);
     line-height: var(--line-height-sm);
-    color: var(--color-text-secondary);
+    color: var(--text-2);
     margin-bottom: var(--space-xl);
 }
 
@@ -125,20 +125,20 @@ ol {
     width: 100%;
 }
 
+/* Inputs are carved from the field well, 1px line, item radius. */
 .input-field,
 .form-select {
     width: 100%;
     line-height: var(--line-height-sm);
     display: flex;
-    background-color: var(--color-bg-input);
-    border: none;
-    border-radius: var(--radius-ui);
-    padding: var(--space-md) var(--space-xl) var(--space-md) 3rem;
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-item);
+    padding: 0.6rem var(--space-xl) 0.6rem 3rem;
     outline: none;
-    color: var(--color-text-primary);
+    color: var(--text);
     font-size: var(--font-size-base);
     font-family: inherit;
-    box-shadow: var(--shadow-input);
     transition: var(--transition-standard);
 }
 
@@ -149,51 +149,54 @@ ol {
 }
 
 .input-field::placeholder {
-    color: var(--color-text-muted);
+    color: var(--muted);
 }
 
 .input-field:focus,
 .form-select:focus {
-    box-shadow: var(--shadow-input-focus);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
 }
 
 .input-icon {
-    left: var(--space-md);
-    color: var(--color-text-muted);
+    inset-inline-start: var(--space-md);
+    color: var(--muted);
     transition: var(--transition-standard);
     pointer-events: none;
 }
 
 .input-group:focus-within .input-icon {
-    color: var(--color-brand-hover);
+    color: var(--accent-hover);
 }
 
 .input-after-icon {
-    right: var(--space-md);
+    inset-inline-end: var(--space-md);
     background: transparent;
     border: none;
-    color: var(--color-text-secondary);
+    color: var(--text-2);
     cursor: pointer;
     transition: var(--transition-standard);
     padding: 0;
 }
 
 .input-after-icon:hover {
-    color: var(--text);
+    color: var(--accent);
 }
 
+/* The install button is the one clay action on this page. */
 .btn-primary {
-    background-color: transparent;
-    border: 2px solid var(--color-brand-primary);
-    color: var(--color-brand-primary);
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--on-accent);
+    min-height: 2.5rem;
     width: max-content;
-    padding: 15px;
+    padding: 0.6rem 0.95rem;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: center;
     gap: var(--space-sm);
-    border-radius: var(--radius-ui);
+    border-radius: var(--radius-item);
     cursor: pointer;
     margin: 0 auto;
     font-weight: 600;
@@ -203,47 +206,40 @@ ol {
 }
 
 .btn-primary:hover {
-    background: var(--color-bg-main);
-    border-color: var(--color-text-secondary);
-    color: var(--color-text-primary);
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
 }
 
-.btn-primary:active {
-    transform: scale(0.97);
-    opacity: 0.9;
+.btn-primary:focus-visible {
+    box-shadow: 0 0 0 3px var(--accent-tint-2);
 }
 
 .btn-secondary {
     border: none;
     background-color: transparent;
-    color: var(--color-brand-primary);
+    color: var(--accent);
     display: flex;
     flex-direction: row;
     cursor: pointer;
     outline: none;
-    transition: all 0.2s ease;
+    transition: var(--transition-standard);
 }
 
 .btn-secondary:hover {
-    color: var(--color-brand-hover);
-    scale: 1.1;
+    color: var(--accent-hover);
 }
 
-.btn-secondary:active {
-    transform: scale(0.97);
-    opacity: 0.9;
-}
-
+/* Install terminal: mono on the deepest readable well. */
 .terminal {
-    background-color: var(--field);
-    border: none;
+    background: var(--field);
+    border: 1px solid var(--line-soft);
     color: var(--color-terminal-text);
-    border-radius: var(--radius-ui);
+    border-radius: var(--radius-item);
     padding: var(--space-lg);
     margin-top: var(--space-xl);
     font-size: var(--font-size-sm);
     line-height: var(--line-height-sm);
-    font-family: "Ubuntu Mono", ui-monospace, Consolas, monospace;
+    font-family: var(--font-mono);
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
@@ -267,7 +263,7 @@ ol {
 }
 
 .terminal-url {
-    color: var(--color-brand-primary);
+    color: var(--accent);
     font-weight: bold;
 }
 
@@ -276,10 +272,10 @@ ol {
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    background-color: var(--color-bg-toast);
-    border: 1px solid var(--color-border-ui);
-    border-radius: var(--radius-ui);
-    box-shadow: var(--shadow-card);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-shell);
     overflow: hidden;
     transition: var(--transition-standard);
 }
@@ -290,8 +286,8 @@ ol {
     align-items: center;
     justify-content: space-between;
     padding: var(--space-md) var(--space-lg);
-    background-color: var(--color-bg-toast-header);
-    border-bottom: 1px solid var(--color-border-ui);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-soft);
 }
 
 .toast-title {
@@ -299,8 +295,8 @@ ol {
     flex-direction: row;
     align-items: center;
     gap: var(--space-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
+    font-weight: 600;
+    color: var(--text);
     font-size: var(--font-size-sm);
 }
 
@@ -308,21 +304,20 @@ ol {
     width: 1.5rem;
     height: 1.5rem;
     display: flex;
-    color: var(--color-success);
+    color: var(--ok);
 }
 
 .toast-close-btn {
     background: transparent;
     border: none;
-    color: var(--color-text-secondary);
+    color: var(--muted);
     cursor: pointer;
     font-size: var(--font-size-base);
-    transition: all 0.2s ease;
+    transition: var(--transition-standard);
 }
 
 .toast-close-btn:hover {
-    color: var(--color-text-primary);
-    scale: 1.1;
+    color: var(--accent);
 }
 
 .toast-body {
@@ -337,21 +332,15 @@ ol {
 }
 
 .toast-link {
-    color: var(--color-brand-primary);
+    color: var(--accent);
     text-decoration: none;
-    font-weight: 500;
+    font-weight: 600;
     display: inline-flex;
-    transition: all 0.2s ease;
+    transition: var(--transition-standard);
 }
 
 .toast-link:hover {
-    color: var(--color-brand-hover);
-    scale: 1.1;
-}
-
-.toast-link:active {
-    transform: scale(0.97);
-    opacity: 0.9;
+    color: var(--accent-hover);
 }
 
 .hidden {
@@ -396,7 +385,7 @@ ol {
     gap: 0.75rem;
     padding: 1rem;
     border: 1px solid var(--line);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: var(--surface-2);
 }
 
@@ -413,7 +402,7 @@ ol {
 .result-item {
     padding: 0.75rem;
     border: 1px solid var(--line-soft);
-    border-radius: 10px;
+    border-radius: var(--radius-item);
     background: var(--surface);
 }
 
@@ -424,14 +413,14 @@ ol {
 }
 
 .result-links {
-    margin-left: auto;
+    margin-inline-start: auto;
     display: flex;
     gap: 0.5rem;
     font-size: var(--font-size-sm);
 }
 
 .result-links a {
-    color: var(--color-brand-primary);
+    color: var(--accent);
 }
 
 .result-state {
@@ -464,11 +453,12 @@ ol {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--font-size-xs);
     padding: 0.35rem 0.5rem;
     background: var(--surface-3);
-    border-radius: 6px;
+    border-radius: var(--radius-item);
 }
 
 .copy-key {
@@ -476,7 +466,7 @@ ol {
     font-weight: 600;
     padding: 0.35rem 0.6rem;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius-item);
     background: var(--surface);
     color: var(--text);
     cursor: pointer;
@@ -484,6 +474,7 @@ ol {
 
 .copy-key:hover {
     border-color: var(--accent);
+    color: var(--accent);
 }
 
 .result-error {

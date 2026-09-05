@@ -1,10 +1,16 @@
 /* ==========================================================================
-   ZAGROOO design tokens
-   Shared by the wizard web UI and the local wizard page. Colour language is Persian folk — deep teal,
-   terracotta clay, cream and sand. Flat surfaces, 1px lines, soft shadows.
+   ZAGROOO design tokens — the single source of truth for both projects.
 
-   The legacy --color-* names are kept as aliases so the existing panel
-   stylesheets keep working while pointing at the new palette.
+   Panel:  ZAG-Panel-main/src/assets/theme.css   (inlined into every page
+           by the build via /* THEME_PLACEHOLDER *​/)
+   Wizard: ZAG-Wizard-main/web/assets/theme.css  (served as a static asset)
+
+   These two files MUST stay byte-identical. See DESIGN.md for the rules:
+   components reference tokens only, never a raw hex.
+
+   Colour language: Persian folk — deep teal (structure), terracotta clay
+   (action), cream & sand (surfaces). Flat surfaces, 1px lines, soft ambient
+   shadows. Dark mode — a deep teal night, never black — is the default.
    ========================================================================== */
 
 :root {
@@ -17,7 +23,9 @@
     --cream: #FBF3E7;
     --cream-2: #F3E8D6;
 
-    /* ---- light theme ---- */
+    /* ---- light theme: warm sand day ----
+       Elevation descends toward warmth: field is the deepest well,
+       surfaces lighten as they rise. */
     --canvas: #E7DCC9;
     --shell: #FFFCF6;
     --surface: #FFFCF6;
@@ -28,10 +36,10 @@
     --line-soft: #EFE4D2;
     --text: #1B3B3F;
     --text-2: #3C5B5C;
-    --muted: #7C8E88;
-    --faint: #A79E8C;
+    --muted: #7C8E88; /* metadata only; large/bold (>=14px) in light mode */
+    --faint: #A79E8C; /* decorative / disabled, never readable text */
     --accent: #D0523A;
-    --accent-hover: #B8452F;
+    --accent-hover: #B8452F; /* darker on hover in light mode */
     --accent-tint: rgba(208, 82, 58, 0.10);
     --accent-tint-2: rgba(208, 82, 58, 0.18);
     --on-accent: #FFF7EF;
@@ -51,13 +59,15 @@
     --red-border: rgba(192, 68, 43, 0.36);
     --red-text: #A83C27;
 
+    /* Depth comes from the elevation ramp, not shadows. Shadows are
+       ambient and neutral — never coloured glows. */
     --shadow-shell: 0 24px 60px -30px rgba(27, 59, 63, 0.45);
     --shadow-soft: 0 2px 6px -2px rgba(27, 59, 63, 0.10);
     --pattern-opacity: 0.5;
 
-    --radius-shell: 22px;
-    --radius-card: 16px;
-    --radius-item: 12px;
+    --radius-shell: 22px; /* modals, page shells */
+    --radius-card: 16px;  /* cards */
+    --radius-item: 12px;  /* inputs, buttons, rows; 999px pills only */
 
     --font-sans: 'Inter', 'Twemoji Country Flags', system-ui, sans-serif;
     --font-fa: 'Vazirmatn', 'Inter', system-ui, sans-serif;
@@ -66,7 +76,8 @@
     --transition-standard: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ---- dark theme: deep teal night (default) ---- */
+/* ---- dark theme: deep teal night (default) ----
+   Surfaces ascend toward the light; --field stays the deepest well. */
 html.dark {
     --canvas: #0C1F23;
     --shell: #143034;
@@ -78,10 +89,10 @@ html.dark {
     --line-soft: #1D3E42;
     --text: #FBF3E7;
     --text-2: #DCCFBB;
-    --muted: #93AAA7;
+    --muted: #93AAA7; /* passes 4.5:1 on dark at any size */
     --faint: #6E8886;
     --accent: #E2684D;
-    --accent-hover: #F07C60;
+    --accent-hover: #F07C60; /* lighter on hover in dark mode */
     --accent-tint: rgba(226, 104, 77, 0.14);
     --accent-tint-2: rgba(226, 104, 77, 0.24);
     --on-accent: #17272A;
@@ -106,8 +117,18 @@ html.dark {
     --pattern-opacity: 0.28;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
+
 /* ==========================================================================
-   Legacy aliases — the existing panel stylesheets are written against these.
+   Legacy aliases — older stylesheets are written against these names.
+   New code uses the modern names above only.
    ========================================================================== */
 
 :root {
@@ -177,6 +198,20 @@ body {
     background: var(--canvas);
     color: var(--text);
     transition: background 0.35s ease, color 0.35s ease;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers that change live render in mono + tabular digits. */
+.tbl-nums,
+.mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+    accent-color: var(--accent);
 }
 
 html[lang="fa"] body,
@@ -225,7 +260,7 @@ html.dark .zag-theme-toggle .icon-light {
 }
 
 /* ==========================================================================
-   Wizard-specific legacy aliases
+   Wizard-specific legacy aliases (panel stylesheets never read these)
    ========================================================================== */
 
 :root {
