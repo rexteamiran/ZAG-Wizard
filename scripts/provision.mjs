@@ -43,41 +43,63 @@ async function accountId() {
 }
 
 /**
- * Searches every page of the account's databases for one by name.
- *
- * This endpoint returns no result_info, so the loop cannot ask when to stop —
- * it runs until a page comes back empty. Stopping after page one is exactly
- * the bug that made an existing database invisible once the account held more
- * than a page of them, and made every later deploy try to create it again.
+ * Every database the list endpoint will admit to, across all pages. The names
+ * are printed so a future failure shows exactly what the API returned.
  */
-async function findDatabase(id, name) {
+async function listDatabases(id) {
+    const all = [];
+
     for (let marker = 1; marker <= 25; marker++) {
         const page = await cf(`/accounts/${id}/d1/database?page=${marker}&per_page=25`);
-        const result = page.result ?? [];
+        const result = Array.isArray(page) ? page : (page.result ?? []);
 
-        const found = result.find(db => db.name === name);
-        if (found) return found;
-
-        if (result.length === 0) return null;
+        if (!result.length) break;
+        all.push(...result);
+        if (result.length < 25) break;
     }
 
-    return null;
+    console.log(`D1 list returned ${all.length} database(s):`);
+    for (const db of all) {
+        console.log(`  - ${db.name} (${db.uuid ?? 'no id'})`);
+    }
+
+    return all;
 }
 
-/** First existing database, preferring one the panel line already owns. */
-async function reuseCandidate(id) {
-    const page = await cf(`/accounts/${id}/d1/database?page=1&per_page=25`);
-    const result = page.result ?? [];
+function byName(databases, name) {
+    const wanted = name.toLowerCase();
+    return databases.find(db => (db.name ?? '').toLowerCase() === wanted && db.uuid) ?? null;
+}
 
-    const owned = result.find(db => db.uuid && db.name?.endsWith('-zagrooo'));
-    return owned ?? result.find(db => db.uuid && db.name) ?? null;
+/** Any usable database, preferring ones the panel line already owns. */
+function reuseCandidate(databases) {
+    return databases.find(db => db.uuid && db.name?.endsWith('-zagrooo'))
+        ?? databases.find(db => db.uuid && db.name?.startsWith('zagrooo'))
+        ?? databases.find(db => db.uuid && db.name)
+        ?? null;
+}
+
+/**
+ * The get-by-name endpoint, which can see a database the paginated list
+ * hides — it has been observed disagreeing with the list, and the deploy
+ * must not die over a disagreement.
+ */
+async function getByName(id, name) {
+    try {
+        const db = await cf(`/accounts/${id}/d1/database/${encodeURIComponent(name)}`);
+        if (db?.uuid) return db;
+        return null;
+    } catch (error) {
+        return null;
+    }
 }
 
 async function main() {
     const id = await accountId();
     console.log(`Account: ${id}`);
 
-    let database = await findDatabase(id, DB_NAME);
+    const databases = await listDatabases(id);
+    let database = byName(databases, DB_NAME);
 
     if (database) {
         console.log(`Found existing database ${DB_NAME} (${database.uuid}).`);
@@ -92,12 +114,11 @@ async function main() {
             const message = String(error.message ?? error);
 
             if (/already exists/i.test(message)) {
-                // Created between the search and this attempt — most likely by
-                // a run whose search missed it. Look again; reuse only if the
-                // list still will not show it.
-                database = await findDatabase(id, DB_NAME);
+                // The list disagrees with create. Ask the get-by-name
+                // endpoint directly; that one has been right before.
+                database = await getByName(id, DB_NAME);
                 if (database) {
-                    console.log(`Found existing database ${DB_NAME} (${database.uuid}).`);
+                    console.log(`Found ${DB_NAME} via direct lookup (${database.uuid}).`);
                 }
             }
 
@@ -108,20 +129,24 @@ async function main() {
                 // database works: its tables are created on first use and do
                 // not collide with a panel's `zag_store`.
                 console.warn('The account is at the D1 database limit. Reusing an existing database for the wizard.');
-                database = await reuseCandidate(id);
-                if (database) {
-                    console.log(`Reusing ${database.name} (${database.uuid}) for the wizard.`);
-                }
+                database = reuseCandidate(databases);
+                if (database) console.log(`Reusing ${database.name} (${database.uuid}) for the wizard.`);
             }
 
             if (!database) {
-                if (/already exists/i.test(message)) {
-                    console.warn(`The API says ${DB_NAME} exists but the list does not show it. Reusing an existing database instead.`);
-                    database = await reuseCandidate(id);
-                    if (database) console.log(`Reusing ${database.name} (${database.uuid}) for the wizard.`);
-                }
+                // Last resort for every other failure, including a stubborn
+                // 'already exists': reuse whatever exists rather than die.
+                console.warn(`Could not create ${DB_NAME} (${message}). Reusing an existing database instead.`);
+                database = reuseCandidate(databases);
+                if (database) console.log(`Reusing ${database.name} (${database.uuid}) for the wizard.`);
+            }
 
-                if (!database) throw error;
+            if (!database) {
+                throw new Error(
+                    `No D1 database is available: the account has none the API will show, ` +
+                    `and creating ${DB_NAME} failed (${message}). ` +
+                    `Delete an unused database in the Cloudflare dashboard and run the deploy again.`
+                );
             }
         }
     }
