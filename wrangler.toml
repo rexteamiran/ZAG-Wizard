@@ -4,6 +4,12 @@ compatibility_date = "2026-07-17"
 workers_dev = true
 keep_vars = true
 
+[[d1_databases]]
+binding = "db"
+database_name = "zagrooo-wizard"
+# Created by the deploy workflow (scripts/provision.mjs) and written back here.
+database_id = "__D1_DATABASE_ID__"
+
 [assets]
 directory = "web/assets"
 binding = "ASSETS"

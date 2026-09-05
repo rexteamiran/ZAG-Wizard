@@ -54,65 +54,32 @@
             <span class="brand-name">ZAGROOO Wizard</span>
         </div>
         <div class="topbar-right">
-            <span class="account" id="account">Not connected</span>
+            <span class="account" id="account">…</span>
+            <button class="btn btn-ghost" id="logout" type="button">Sign out</button>
             <a class="btn btn-ghost" href="/">Install a panel</a>
         </div>
     </header>
 
     <main class="wrap">
-        <!-- ---------- connect ---------- -->
-        <section class="card" id="connect-card">
-            <h2>Connect your Cloudflare account</h2>
-            <p class="muted">
-                Paste the API token the wizard used to install your panels, or use the private link
-                you were given after an install. The token is used for this session only and is never stored.
-            </p>
-            <div class="row">
-                <input type="password" id="token" placeholder="Cloudflare API token" autocomplete="off" />
-                <button class="btn btn-accent" id="connect" type="button">Connect</button>
-            </div>
-            <p class="muted small">
-                Minimum scopes: Workers Scripts Edit, Workers KV Storage Edit, D1 Edit, Pages Edit,
-                Account Analytics Read, User Details Read.
-            </p>
-        </section>
-
-        <!-- ---------- account quota ---------- -->
-        <section class="card quota-card" id="quota-card" hidden>
-            <div class="quota-head">
-                <div>
-                    <strong>Account requests today</strong>
-                    <span class="muted small" id="quota-note">
-                        The free plan allows 100,000 requests per day across every worker on the account.
-                        When it runs out, all your panels stop at once.
-                    </span>
-                </div>
-                <span class="pill" id="quota-pill">—</span>
-            </div>
-            <div class="track"><span class="bar" id="quota-bar"></span></div>
-            <span class="muted small" id="quota-text">—</span>
-        </section>
-
         <!-- ---------- tabs ---------- -->
-        <nav class="tabs" id="tabs" hidden>
-            <button class="tab is-active" data-tab="panels" type="button">Panels</button>
+        <nav class="tabs" id="tabs">
+            <button class="tab is-active" data-tab="api" type="button">API</button>
             <button class="tab" data-tab="zagiro" type="button">ZagiRo profiles</button>
             <button class="tab" data-tab="templates" type="button">Templates</button>
         </nav>
 
-        <!-- ---------- panels ---------- -->
-        <section id="panels-section" hidden>
+        <!-- ---------- API ---------- -->
+        <section id="api-section">
             <div class="toolbar">
-                <input type="search" id="search" placeholder="Filter panels…" />
-                <select id="sort" class="form-select">
-                    <option value="name">Sort: name</option>
-                    <option value="usage">Sort: most used</option>
-                    <option value="expiry">Sort: expiring soonest</option>
-                    <option value="status">Sort: problems first</option>
-                </select>
+                <div>
+                    <strong>Panel connections</strong>
+                    <p class="muted small" style="margin:0.25rem 0 0">
+                        Each panel is reached through its own API with the key you got at install.
+                        The browser talks to the panels directly — this page only stores the list.
+                    </p>
+                </div>
                 <div class="toolbar-right">
-                    <span class="muted small" id="count">—</span>
-                    <button class="btn btn-ghost" id="export" type="button">Export CSV</button>
+                    <button class="btn btn-accent" id="conn-add" type="button">Add panel</button>
                     <button class="btn btn-ghost" id="refresh" type="button">Refresh</button>
                 </div>
             </div>
@@ -141,6 +108,20 @@
                 <span class="muted small" id="page-label">—</span>
                 <button class="btn btn-ghost" id="next" type="button">Next</button>
             </div>
+
+            <div class="toolbar">
+                <span class="muted small" id="count">—</span>
+                <div class="toolbar-right">
+                    <input type="search" id="search" placeholder="Filter panels…" />
+                    <select id="sort" class="form-select">
+                        <option value="name">Sort: name</option>
+                        <option value="usage">Sort: most used</option>
+                        <option value="expiry">Sort: expiring soonest</option>
+                        <option value="status">Sort: problems first</option>
+                    </select>
+                    <button class="btn btn-ghost" id="export" type="button">Export CSV</button>
+                </div>
+            </div>
         </section>
 
         <!-- ---------- ZagiRo ---------- -->
@@ -166,7 +147,7 @@
                     <strong>Setting templates</strong>
                     <p class="muted small" style="margin:0.25rem 0 0">
                         Ready-made configurations. Apply one to the panels you have selected on the
-                        Panels tab, or save it as a ZagiRo profile to attach quotas to it.
+                        API tab, or save it as a ZagiRo profile to attach quotas to it.
                     </p>
                 </div>
                 <div class="toolbar-right">
@@ -184,6 +165,26 @@
             <div id="templates" class="panel-grid"></div>
         </section>
     </main>
+
+    <!-- ---------- add connection ---------- -->
+    <div class="modal" id="conn-modal" hidden>
+        <div class="modal-card">
+            <button class="modal-close" id="conn-close" type="button">✕</button>
+            <h3 id="conn-title">Add a panel</h3>
+
+            <div class="field-grid">
+                <label>Name<input type="text" id="c-label" placeholder="e.g. zag1" /></label>
+                <label>Panel address<input type="text" id="c-url"
+                        placeholder="https://zag1.example.workers.dev/path/panel" /></label>
+                <label>API key<input type="password" id="c-key" placeholder="the key from the install page" /></label>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-accent" id="conn-save" type="button">Save &amp; test</button>
+            </div>
+            <p class="muted small" id="conn-status" style="margin:0.5rem 0 0"></p>
+        </div>
+    </div>
 
     <!-- ---------- panel editor ---------- -->
     <div class="modal" id="edit-modal" hidden>
@@ -224,11 +225,9 @@
             <div class="modal-actions">
                 <button class="btn btn-accent" id="edit-save" type="button">Save limits</button>
                 <button class="btn btn-ghost" id="edit-pause" type="button">Pause</button>
-                <button class="btn btn-ghost" id="edit-update" type="button">Update panel</button>
-                <button class="btn btn-ghost" id="edit-addd1" type="button">Add D1</button>
-                <button class="btn btn-ghost" id="edit-repair" type="button">Repair links</button>
                 <button class="btn btn-ghost" id="edit-reset" type="button">Reset usage</button>
-                <button class="btn btn-danger" id="edit-delete" type="button">Delete panel</button>
+                <button class="btn btn-ghost" id="edit-update" type="button">Update panel</button>
+                <button class="btn btn-danger" id="edit-forget" type="button">Remove connection</button>
             </div>
         </div>
     </div>

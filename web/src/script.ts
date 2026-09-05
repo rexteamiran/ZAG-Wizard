@@ -1,5 +1,5 @@
 import { toFile, Uploadable } from "cloudflare";
-import { CFAccount } from "./api";
+import { CFAccount } from "./cf";
 import { randCode, randString } from "./random";
 
 interface Script {
@@ -12,7 +12,8 @@ export async function buildScript(
     workerName: string,
     subdomain: string,
     filename: string,
-    preRelease: boolean
+    preRelease: boolean,
+    databaseId: string
 ): Promise<Script> {
     const pathCharset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456780-_';
     const passCharset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$&*_-+;:,.';
@@ -20,7 +21,7 @@ export async function buildScript(
     let url = 'https://github.com/rexteamiran/ZAG-Panel/releases/latest/download/worker.js';
     if (preRelease) {
         const res = await fetch('https://raw.githubusercontent.com/rexteamiran/ZAG-Panel/refs/heads/dev/package.json');
-        if(!res.ok) {
+        if (!res.ok) {
             throw new Error(`Failed to get pre-release script: status ${res.status} at ${res.url}`);
         }
 
@@ -30,7 +31,7 @@ export async function buildScript(
 
     const res = await fetch(url);
     if (!res.ok) {
-        throw new Error(`Failed to get panel script: status ${res.status} at ${res.url}`)
+        throw new Error(`Failed to get panel script: status ${res.status} at ${res.url}`);
     }
 
     const script = await res.text();
@@ -50,7 +51,11 @@ export async function buildScript(
         prefixes: [],
         fallback: '',
         dohUrl: '',
-        mainDomain: `${workerName}.${subdomain}`
+        mainDomain: `${workerName}.${subdomain}`,
+        // Namespaces this panel's rows inside the shared database, and lets a
+        // self-update re-bind `zag_db` without asking anyone.
+        panelId: workerName,
+        d1Id: databaseId
     };
 
     const worker = [
@@ -68,5 +73,5 @@ export async function buildScript(
     return {
         script: uploadable,
         path: path
-    }
+    };
 }

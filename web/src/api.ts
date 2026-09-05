@@ -1,210 +1,228 @@
-import Cloudflare, { Uploadable } from 'cloudflare';
-import { randSubdomain } from './random';
+/* ==========================================================================
+   Dashboard API — connections and profiles
 
-export class CFAccount {
-    readonly token: string;
-    readonly id: string;
-    readonly email: string;
-    readonly client: Cloudflare;
+   The dashboard talks to panels directly from the browser (panels send CORS
+   headers). This module only stores what the browser cannot: the connection
+   list per user, with API keys encrypted at rest, and their ZagiRo profiles.
 
-    private constructor(token: string, client: Cloudflare, id: string, email: string) {
-        this.token = token;
-        this.client = client;
-        this.id = id;
-        this.email = email;
-    }
+   Everything is scoped by user id — no one ever reads another user's
+   connections.
+   ========================================================================== */
 
-    static async create(token: string): Promise<CFAccount> {
-        const client = new Cloudflare({ apiToken: token });
+import { ensureSchema, query, run } from './db';
+import { decrypt, encrypt } from './encryption';
 
-        const response = await client.user.tokens.verify();
-        if (response.status !== 'active') {
-            throw new Error(`API token is ${response.status}.`)
-        }
+export interface ConnectionRow {
+    id: string;
+    label: string;
+    api_url: string;
+    api_key: string;
+    created_at: number;
+}
 
-        const [accounts, user] = await Promise.all([
-            client.accounts.list(),
-            client.user.get(),
-        ]);
+export interface ProfileRow {
+    id: string;
+    name: string;
+    note: string;
+    settings: string | null;
+    limits: string | null;
+    valid_days: number | null;
+    updated_at: number;
+}
 
-        return new CFAccount(token, client, accounts.result[0].id, user.email.toLowerCase());
-    }
+async function withDb<T>(env: Env, fn: () => Promise<T>): Promise<T> {
+    await ensureSchema(env.db);
+    return await fn();
+}
 
-    async nameTaken(deployType: string, name: string): Promise<boolean> {
-        try {
-            if (deployType === "pages") {
-                await this.client.pages.projects.get(name, {
-                    account_id: this.id,
-                });
-            }
+/* ------------------------------------------------------------- connections */
 
-            await this.client.workers.scripts.get(name, {
-                account_id: this.id,
-            });
+/**
+ * Lists the user's connections with decrypted API keys. The browser needs the
+ * raw keys — it calls the panels' APIs directly, server-side only as far as
+ * storage is concerned. Only the owning user's session can ever see them.
+ */
+export async function listConnections(env: Env, userId: string): Promise<Array<ConnectionRow>> {
+    return withDb(env, async () => {
+        const rows = await query<ConnectionRow>(
+            env.db,
+            'SELECT * FROM connections WHERE user_id = ? ORDER BY created_at',
+            [userId]
+        );
 
-            return true;
-        } catch (error) {
-            return false;
-        }
-    }
+        return Promise.all(rows.map(async ({ api_key, ...rest }) => ({
+            ...rest,
+            api_key: await decrypt(api_key, env.SECRET)
+        })));
+    });
+}
 
-    /**
-     * Provisions the usage-accounting database each ZAGROOO panel binds as
-     * `zag_db`. Returns an empty string when D1 is unavailable, which makes
-     * the panel fall back to buffered KV accounting.
-     */
-    async createD1Database(workerName: string): Promise<{ id: string; error: string }> {
-        try {
-            const database = await this.client.d1.database.create({
-                account_id: this.id,
-                name: `${workerName}-zagrooo`
-            });
+export async function addConnection(env: Env, userId: string, body: Record<string, any>): Promise<ConnectionRow> {
+    return withDb(env, async () => {
+        const label = String(body.label ?? '').trim().slice(0, 60);
+        const apiUrl = normaliseApiUrl(String(body.apiUrl ?? ''));
+        const apiKey = String(body.apiKey ?? '').trim();
 
-            const id = database.uuid ?? '';
-            return id
-                ? { id, error: '' }
-                : { id: '', error: 'Cloudflare returned no database id.' };
-        } catch (error: any) {
-            // Report why, rather than a bare "unavailable". Almost always this
-            // is an API token created without the D1 Edit permission.
-            const detail = error?.errors?.[0]?.message ?? error?.message ?? String(error);
-            const status = error?.status ?? error?.statusCode;
+        if (!label) throw new Error('Give this connection a name.');
+        if (!apiUrl) throw new Error('Missing panel API address.');
+        if (!apiKey) throw new Error('Missing API key.');
 
-            const hint = (status === 403 || status === 401 || /permission|authoriz|denied/i.test(detail))
-                ? 'Your API token is missing the D1:Edit permission.'
-                : detail;
-
-            return { id: '', error: hint };
-        }
-    }
-
-    async createKvNamespace(workerName: string, deployType: string): Promise<string> {
-        const now = new Date();
-        const title = `${workerName}-${deployType}-${now.toISOString()}`;
-
-        const namespace = await this.client.kv.namespaces.create({
-            account_id: this.id,
-            title,
-        });
-
-        return namespace.id;
-    }
-
-    async getWorkersDevSubdomain(): Promise<string> {
-        const res = await this.client.workers.subdomains.get({
-            account_id: this.id,
-        });
-
-        return `${res.subdomain}.workers.dev`;
-    }
-
-    async createWorkersDevSubdomain(): Promise<string> {
-        const maxAttempts = 3;
-
-        for (let i = 0; i < maxAttempts; i++) {
-            try {
-                const res = await this.client.workers.subdomains.update({
-                    account_id: this.id,
-                    subdomain: randSubdomain(),
-                });
-
-                return res.subdomain;
-            } catch (err) {
-                continue;
-            }
-        }
-
-        throw new Error(`Failed to create a unique workers.dev subdomain after ${maxAttempts} attempts.`);
-    }
-
-    async deployWorker(name: string, script: Uploadable, namespaceId: string, databaseId = '') {
-        // TS SDK has bugs for workers deployment - Uploading files
-        const date = new Date().toISOString().split('T')[0];
-        const bindings: Record<string, string>[] = [
-            { type: 'kv_namespace', name: 'kv', namespace_id: namespaceId }
-        ];
-
-        if (databaseId) {
-            bindings.push({ type: 'd1', name: 'zag_db', id: databaseId });
-        }
-
-        const metadata = {
-            main_module: 'worker.js',
-            compatibility_date: date,
-            compatibility_flags: ['nodejs_compat'],
-            bindings
+        const row: ConnectionRow = {
+            id: crypto.randomUUID(),
+            label,
+            api_url: apiUrl,
+            api_key: await encrypt(apiKey, env.SECRET),
+            created_at: Date.now()
         };
 
-        const uploadForm = new FormData();
-        uploadForm.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        uploadForm.append('worker.js', script as File, 'worker.js');
+        await run(
+            env.db,
+            'INSERT INTO connections (id, user_id, label, api_url, api_key, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            [row.id, userId, row.label, row.api_url, row.api_key, row.created_at]
+        );
 
-        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${this.id}/workers/scripts/${name}`, {
-            method: 'PUT',
-            headers: { 'Authorization': `Bearer ${this.token}` },
-            body: uploadForm
-        });
+        // The caller just typed the key; hand it back in the clear so the
+        // response reads the same as the stored-encrypted list endpoint.
+        return { ...row, api_key: apiKey };
+    });
+}
 
-        const data = await res.json() as any;
-        if (!res.ok || !data.success) {
-            throw new Error(`Error deploying worker: ${JSON.stringify(data.errors, null, 2)}`)
-        }
+export async function updateConnection(env: Env, userId: string, id: string, body: Record<string, any>): Promise<void> {
+    return withDb(env, async () => {
+        const rows = await query<ConnectionRow>(
+            env.db, 'SELECT * FROM connections WHERE id = ? AND user_id = ?', [id, userId]
+        );
+        const row = rows[0];
+        if (!row) throw new Error('No such connection.');
 
-        // await this.client.workers.scripts.update(name, {
-        //     account_id: this.id,
-        //     metadata: {
-        //         main_module: 'worker.js',
-        //         compatibility_date: date,
-        //         compatibility_flags: ['nodejs_compat'],
-        //         bindings: [{
-        //             name: 'kv',
-        //             namespace_id: namespaceId,
-        //             type: 'kv_namespace',
-        //         }],
-        //     },
-        //     files: [uploadable]
-        // });
-    }
+        const label = body.label !== undefined ? String(body.label).trim().slice(0, 60) || row.label : row.label;
+        const apiUrl = body.apiUrl !== undefined ? normaliseApiUrl(String(body.apiUrl)) : row.api_url;
+        const apiKey = body.apiKey ? await encrypt(String(body.apiKey).trim(), env.SECRET) : row.api_key;
 
-    async enableSubdomain(name: string) {
-        await this.client.workers.scripts.subdomain.create(name, {
-            account_id: this.id,
-            enabled: true,
-            previews_enabled: true,
-        });
-    }
+        await run(
+            env.db,
+            'UPDATE connections SET label = ?, api_url = ?, api_key = ? WHERE id = ? AND user_id = ?',
+            [label, apiUrl, apiKey, id, userId]
+        );
+    });
+}
 
-    async createPagesProject(name: string, namespaceId: string, databaseId = ''): Promise<string> {
-        const date = new Date().toISOString().split('T')[0];
+export async function deleteConnection(env: Env, userId: string, id: string): Promise<void> {
+    return withDb(env, async () => {
+        await run(env.db, 'DELETE FROM connections WHERE id = ? AND user_id = ?', [id, userId]);
+    });
+}
 
-        const project = await this.client.pages.projects.create({
-            account_id: this.id,
-            name: name,
-            production_branch: 'main',
-            deployment_configs: {
-                production: {
-                    browsers: {},
-                    compatibility_date: date,
-                    compatibility_flags: ['nodejs_compat'],
-                    kv_namespaces: {
-                        'kv': { namespace_id: namespaceId }
-                    },
-                    d1_databases: databaseId ? { 'zag_db': { id: databaseId } } : {}
-                }
-            }
-        });
+/**
+ * Returns the decrypted key for a connection the user owns.
+ */
+export async function resolveConnection(env: Env, userId: string, id: string): Promise<{ apiUrl: string; apiKey: string }> {
+    return withDb(env, async () => {
+        const rows = await query<ConnectionRow>(
+            env.db, 'SELECT * FROM connections WHERE id = ? AND user_id = ?', [id, userId]
+        );
+        const row = rows[0];
+        if (!row) throw new Error('No such connection.');
 
-        return project.subdomain ?? '';
-    }
+        return { apiUrl: row.api_url, apiKey: await decrypt(row.api_key, env.SECRET) };
+    });
+}
 
-    async deployPages(name: string, script: Uploadable) {
-        await this.client.pages.projects.deployments.create(name, {
-            account_id: this.id,
-            branch: 'main',
-            manifest: '{}',
-            "_worker.js": script
-        });
+/** Accepts the panel base URL or its /panel page; stores the API root. */
+export function normaliseApiUrl(raw: string): string {
+    let url = raw.trim().replace(/\/+$/, '');
+    if (!url) return '';
+
+    if (!/^https:\/\//i.test(url)) url = `https://${url}`;
+    // "https://host/path/panel" -> "https://host/path/api"
+    url = url.replace(/\/panel$/, '/api');
+    if (!/\/api$/.test(url)) url = `${url}/api`;
+
+    try {
+        const parsed = new URL(url);
+        return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+    } catch (error) {
+        throw new Error('That panel address does not look like a URL.');
     }
 }
 
+/* ---------------------------------------------------------------- profiles */
 
+export interface ZagiroProfile {
+    id: string;
+    name: string;
+    note: string;
+    updatedAt: number;
+    settings: Record<string, any> | null;
+    limits: Record<string, any> | null;
+    validDays?: number;
+}
+
+export async function listProfiles(env: Env, userId: string): Promise<ZagiroProfile[]> {
+    return withDb(env, async () => {
+        const rows = await query<ProfileRow>(
+            env.db, 'SELECT * FROM profiles WHERE user_id = ? ORDER BY name', [userId]
+        );
+
+        return rows.map(row => ({
+            id: row.id,
+            name: row.name,
+            note: row.note,
+            updatedAt: row.updated_at,
+            settings: row.settings ? JSON.parse(row.settings) : null,
+            limits: row.limits ? JSON.parse(row.limits) : null,
+            validDays: row.valid_days ?? undefined
+        }));
+    });
+}
+
+export async function saveProfile(env: Env, userId: string, profile: Partial<ZagiroProfile>): Promise<ZagiroProfile> {
+    return withDb(env, async () => {
+        const existing = profile.id
+            ? (await query<ProfileRow>(env.db, 'SELECT * FROM profiles WHERE id = ? AND user_id = ?', [profile.id, userId]))[0]
+            : undefined;
+
+        const next: ZagiroProfile = {
+            id: existing?.id ?? crypto.randomUUID(),
+            name: String(profile.name ?? existing?.name ?? 'Untitled').slice(0, 60),
+            note: String(profile.note ?? existing?.note ?? '').slice(0, 200),
+            updatedAt: Date.now(),
+            settings: profile.settings !== undefined ? profile.settings : existing ? jsonOrNull(existing.settings) : null,
+            limits: profile.limits !== undefined ? profile.limits : existing ? jsonOrNull(existing.limits) : null,
+            validDays: profile.validDays !== undefined ? profile.validDays : existing?.valid_days ?? undefined
+        };
+
+        await run(
+            env.db,
+            `INSERT INTO profiles (id, user_id, name, note, settings, limits, valid_days, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, note = excluded.note,
+                 settings = excluded.settings, limits = excluded.limits,
+                 valid_days = excluded.valid_days, updated_at = excluded.updated_at`,
+            [
+                next.id, userId, next.name, next.note,
+                next.settings ? JSON.stringify(next.settings) : null,
+                next.limits ? JSON.stringify(next.limits) : null,
+                next.validDays ?? null,
+                next.updatedAt
+            ]
+        );
+
+        return next;
+    });
+}
+
+export async function deleteProfile(env: Env, userId: string, id: string): Promise<void> {
+    return withDb(env, async () => {
+        await run(env.db, 'DELETE FROM profiles WHERE id = ? AND user_id = ?', [id, userId]);
+    });
+}
+
+function jsonOrNull(raw: string | null): Record<string, any> | null {
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch (error) {
+        return null;
+    }
+}

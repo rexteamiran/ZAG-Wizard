@@ -2,77 +2,64 @@
 
 ## Introduction
 
-**ZAGROOO Wizard** installs and centrally manages [ZAGROOO Panel](https://github.com/rexteamiran/ZAG-Panel)
+**ZAGROOO Wizard** installs and manages [ZAGROOO Panel](https://github.com/rexteamiran/ZAG-Panel)
 deployments on Cloudflare Workers and Pages.
 
-One wizard manages every panel on your account: usage quotas, speed caps, expiry
-dates, subscriber links and the panels themselves.
+The panel is the API: every panel serves its own management API secured by an
+API key. The wizard's dashboard signs you in, connects to your panels through
+those APIs, and manages all of them from one place — the browser talks to the
+panels directly, so managing a hundred panels costs the wizard no request
+quota.
 
 ## Editions
 
 | Edition | How to run it | Notes |
 | --- | --- | --- |
-| **Hosted worker** | Deploy this repo to Cloudflare Workers | Install panels and manage them at `/dashboard` |
-| **CLI** | `install.sh` / `install.ps1` | Install-only, runs on Linux, macOS, Windows and Termux |
-| **Local page** | `npm run local` | Management only, runs on your own machine |
+| **Hosted worker** | Deploy this repo to Cloudflare Workers | Install panels at `/`, manage them at `/dashboard` |
+
+The dashboard has its own accounts: registration requires the invite code you
+set as the `WIZARD_INVITE_CODE` secret. With the secret unset, registration is
+closed and existing accounts keep working.
 
 ## What the wizard does
 
-- Creates the worker or Pages project, its KV namespace and its D1 database
-- Lists every ZAGROOO panel on the account, with live usage per panel
-- Edits total and daily volume caps, download and upload speed caps (KB/s),
-  expiry dates, device limits and monthly resets
-- Pauses, resumes, resets usage counters and deletes panels
-- Copies subscriber portal links, with plan templates for common packages
+- Installs one panel — or a whole group of up to twenty — from a single
+  Cloudflare API token. Unnamed panels are numbered automatically
+  (`zag1`, `zag2`, … `zag20`), and the counter continues on your next install.
+- All panels of one account share a single D1 database, each namespaced with
+  its own panel id, so the free plan's ten-database cap never limits how many
+  panels you run.
+- Every panel gets a **Dashboard API key** at install — add it once on the
+  dashboard's API page and the panel is yours to manage.
+- Manages connected panels through their own APIs: quotas, daily caps,
+  download/upload speed limits, expiry dates, device limits, monthly resets,
+  pause/resume, usage resets and self-updates to the latest release.
+- ZagiRo profiles: saved bundles of limits and proxy settings, applied to any
+  set of panels. Setting templates (the panel's own library) can be applied
+  the same way.
 
-## The local edition
+## Deploying the wizard
 
-Manage every panel from your own machine, with no worker deployed:
+1. Add three repository secrets under *Settings → Secrets and variables →
+   Actions*:
+   - `CLOUDFLARE_API_TOKEN` — Workers Scripts Edit, D1 Edit, Account Settings Read
+   - `WIZARD_SECRET` — any long random string; encrypts stored panel API keys
+   - `WIZARD_INVITE_CODE` — the sign-up code (leave unset to close registration)
+2. Run the **Deploy Wizard** workflow. It provisions the wizard's D1 database
+   and deploys the worker.
+3. Open the wizard, install panels, and connect them on the dashboard.
 
-```
-npm install
-npm run local
-```
-
-Then open <http://127.0.0.1:8787> and paste a Cloudflare API token.
-
-Nothing is uploaded anywhere and nothing is written to disk. The token goes
-browser to local server to Cloudflare, and is gone when you stop the process.
-
-### Why it needs a server
-
-`local.html` cannot be opened straight from disk. `api.cloudflare.com` sends no
-`Access-Control-Allow-Origin` header on token-authenticated requests, so the
-browser blocks every call before it leaves the page. `scripts/local-server.mjs`
-is a dependency-free Node server that serves the page and proxies `/cf/*` to the
-Cloudflare API, which makes those calls same-origin. It binds to `127.0.0.1`
-only.
-
-To rebuild just the page without starting the server:
-
-```
-npm run build-local
-```
-
-### Token scopes
-
-Create a token with only what the wizard needs:
-
-- Workers Scripts: Edit
-- Workers KV Storage: Edit
-- D1: Edit
-- Cloudflare Pages: Edit
-- Account Settings: Read
-- User Details: Read
-
-Never use a Global API Key. Anyone with access to the browser profile that
-holds the token has the same access to your Cloudflare account.
+The wizard CLI (the Go binary built from this repo) remains install-only, for
+machines where opening a browser is awkward.
 
 ## Storage
 
-Usage counters go to D1, which allows far more writes per day than KV on the
-free plan. Panels deployed before D1 support fall back to buffered KV
-accounting automatically — the wizard shows which store each panel uses.
+- The **wizard's** database (`zagrooo-wizard`) holds accounts, sessions,
+  connections, profiles and install counters. Panel API keys are encrypted at
+  rest with `WIZARD_SECRET`.
+- Every **panel** binds one shared account database (`zagrooo-panels`) as
+  `zag_db`. Panels deployed before 1.3.0 cannot self-update into this
+  architecture — reinstall them once with the current wizard.
 
 ## Credits
 

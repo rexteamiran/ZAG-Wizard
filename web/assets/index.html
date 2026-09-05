@@ -63,9 +63,8 @@
                         </span>
                     </a>
                 </div>
-                <p class="subtitle">Install ZAGROOO Panel efficiently</p>
+                <p class="subtitle">Install ZAGROOO Panels</p>
                 <p class="subtitle"><a href="/dashboard">Manage your panels &rarr;</a></p>
-                <h4 id="user" style="display: none;"></h4>
                 <ol id="steps">
                     <li>
                         <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener noreferrer">Sign
@@ -75,8 +74,8 @@
                         <a id="tokenTemplate" href="" target="_blank" rel="noopener noreferrer">Create a token</a>
                         , you should <b>Continue to summary</b>, <b>Create Token</b> and copy it.
                     </li>
-                    <li>Paste it here, choose installation method and install.</li>
-                    <li>After installation you get a <b>Private Link</b> which enables one-click installation.</li>
+                    <li>Paste it here, choose how many panels and install.</li>
+                    <li>Each installed panel gets an <b>API key</b> — add it on the dashboard's API page.</li>
                 </ol>
             </div>
 
@@ -100,25 +99,39 @@
                 </div>
 
                 <div class="input-group">
-                    <span class="material-symbols-rounded input-icon">
-                        badge
+                    <span class="input-icon">
+                        <span class="material-symbols-rounded">
+                            badge
+                        </span>
                     </span>
                     <input id="displayName" name="displayName" type="text" class="input-field"
-                        maxlength="64" placeholder="Display name (optional) - e.g. Ali, Customer 12" />
+                        maxlength="40" placeholder="Display name (optional) — zag1, zag2… or Prefix-1, Prefix-2…" />
                 </div>
 
-                <div class="input-group">
-                    <span class="material-symbols-rounded input-icon">
-                        alt_route
-                    </span>
-                    <select id="deployType" name="deployType" class="form-select">
-                        <option value="workers">Cloudflare Workers</option>
-                        <option value="pages">Cloudflare Pages</option>
-                    </select>
-                    <span class="material-symbols-rounded input-after-icon">
-                        keyboard_arrow_down
-                    </span>
+                <div class="input-row">
+                    <div class="input-group">
+                        <span class="material-symbols-rounded input-icon">
+                            alt_route
+                        </span>
+                        <select id="deployType" name="deployType" class="form-select">
+                            <option value="workers">Cloudflare Workers</option>
+                            <option value="pages">Cloudflare Pages</option>
+                        </select>
+                        <span class="material-symbols-rounded input-after-icon">
+                            keyboard_arrow_down
+                        </span>
+                    </div>
+
+                    <div class="input-group count-group">
+                        <input id="count" name="count" type="number" class="input-field" min="1" max="20" value="1" />
+                        <span class="count-hint">panels (1–20)</span>
+                    </div>
                 </div>
+
+                <label class="check-inline">
+                    <input id="preRelease" name="preRelease" type="checkbox" />
+                    <span>Use the pre-release build</span>
+                </label>
 
                 <button type="submit" class="btn-primary">
                     <span class="material-symbols-rounded">
@@ -127,50 +140,7 @@
                     Install
                 </button>
 
-                <div id="privateUrlToast" class="toast-card hidden">
-                    <div class="toast-header">
-                        <div class="toast-title">
-                            <span class="material-symbols-rounded toast-success-icon">
-                                check_circle
-                            </span>
-                            ZAGROOO Wizard private link
-                        </div>
-                        <button id="closePrivateUrlToast" class="toast-close-btn">
-                            ✕
-                        </button>
-                    </div>
-                    <div class="toast-body">
-                        Your private link to use wizard in one-click mode.
-                        <button id="copyURL" type="button" class="btn-secondary">
-                            <span class="material-symbols-rounded">
-                                content_copy
-                            </span>
-                        </button>
-                    </div>
-                </div>
-
-                <div id="deploymentToast" class="toast-card hidden">
-                    <div class="toast-header">
-                        <div class="toast-title">
-                            <span class="material-symbols-rounded toast-success-icon">
-                                check_circle
-                            </span>
-                            Successfully installed
-                        </div>
-                        <button id="closeDeploymentToast" class="toast-close-btn">
-                            ✕
-                        </button>
-                    </div>
-                    <div class="toast-body">
-                        Access your ZAGROOO Panel.
-                        <a id="liveUrl" href="#" target="_blank" class="toast-link">
-                            <span class="material-symbols-rounded">
-                                open_in_new
-                            </span>
-                        </a>
-                    </div>
-                </div>
-
+                <div id="results" class="results" hidden></div>
             </form>
 
             <pre id="output" class="terminal">●●● Standby

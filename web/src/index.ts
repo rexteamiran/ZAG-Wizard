@@ -1,230 +1,169 @@
-import { CFAccount } from "./api";
-import { decrypt, encrypt } from "./encryption";
-import { randSubdomain } from "./random";
-import { buildScript } from "./script";
-import { createStreamLogger, StreamLogger } from "./logger";
-import { handleManage as handleManageRequest, ManageRequest } from "./handle-manage";
-import { seedPanelRecord } from "./seed";
+/* ==========================================================================
+   ZAGROOO Wizard — worker
+
+   Three faces:
+
+     /            the install page (open; brings its own Cloudflare token)
+     /login       account gate for the dashboard
+     /dashboard   manage every panel through each panel's own API
+
+   The worker itself holds no panel traffic: it stores accounts, sessions,
+   connections and profiles in its own D1 database, streams install logs, and
+   serves the static UI. Panel management happens browser -> panel API, so
+   managing a hundred panels costs the wizard no request quota at all.
+   ========================================================================== */
+
+import { CFAccount } from './cf';
+import { installPanels } from './install';
+import { createStreamLogger } from './logger';
+import {
+    sessionOf, handleAuth, json
+} from './auth';
+import {
+    addConnection, deleteConnection, listConnections, updateConnection,
+    listProfiles, saveProfile, deleteProfile
+} from './api';
 
 interface Env {
     SECRET: string;
+    db: D1Database;
+    WIZARD_INVITE_CODE?: string;
     ASSETS: any;
 }
 
 export default {
-    async fetch(request: Request, env: Env) {
+    async fetch(request: Request, env: Env): Promise<Response> {
         const url = new URL(request.url);
 
-        if (url.pathname === '/api/deploy' && request.method === 'POST') {
-            const origin = request.headers.get('Origin');
-            if (origin !== url.origin) {
-                return new Response('Unauthorized context', { status: 403 });
-            }
-
-            const logger = createStreamLogger();
-            const { readable, success, info, error, close } = logger;
-
-            (async () => {
-                try {
-                    const key = url.searchParams.get('key');
-                    const preRelease = url.searchParams.get('pre-release') === 'true';
-                    const formData = await request.formData();
-                    const apiToken = key ? await decrypt(key, env.SECRET) : formData.get('apiToken')?.toString().trim() ?? '';
-                    const deployType = formData.get('deployType')?.toString() || 'workers';
-                    const displayName = formData.get('displayName')?.toString().trim().slice(0, 64) ?? '';
-                    const account = await CFAccount.create(apiToken);
-
-                    let workerName: string;
-                    do {
-                        workerName = randSubdomain();
-                    } while (await account.nameTaken(deployType, workerName));
-
-                    info('Installing ZAGROOO Panel...');
-                    const namespaceId = await account.createKvNamespace(workerName, deployType);
-                    success('KV namespace created successfully!');
-
-                    const d1 = await account.createD1Database(workerName);
-                    const databaseId = d1.id;
-                    if (databaseId) {
-                        success('D1 database created successfully!');
-                    } else {
-                        error(`D1 not created: ${d1.error}`);
-                        info('Falling back to KV accounting (1000 writes/day on the free plan).');
-                        info('Fix the token permission and reinstall to get D1.');
-                    }
-
-                    if (deployType === 'pages') {
-                        await deployPages(env, account, workerName, namespaceId, databaseId, logger, preRelease, displayName);
-                    } else {
-                        await deployWorkers(env, account, workerName, namespaceId, databaseId, logger, preRelease, displayName);
-                    }
-                } catch (err) {
-                    error(`Failed to install ZAGROOO Panel: ${err}`);
-                } finally {
-                    close();
-                }
-            })();
-
-            return new Response(readable, {
-                headers: {
-                    'Content-Type': 'application/x-ndjson'
-                }
-            });
+        if (url.pathname.startsWith('/api/auth/')) {
+            return handleAuth(request, env);
         }
 
+        if (url.pathname === '/api/install' && request.method === 'POST') {
+            return handleInstall(request, env);
+        }
 
-        if (url.pathname.startsWith('/api/manage/')) {
-            const origin = request.headers.get('Origin');
-            if (origin !== url.origin) {
-                return new Response('Unauthorized context', { status: 403 });
-            }
+        // Everything below needs a signed-in user.
+        const session = await sessionOf(request, env);
 
-            return handleManage(request, env, url);
+        if (url.pathname.startsWith('/api/')) {
+            if (!session) return json({ success: false, message: 'Sign in first.' }, 401);
+            return handleApi(request, env, session);
         }
 
         if (url.pathname === '/dashboard') {
-            return env.ASSETS.fetch(new URL('/dashboard.html', request.url));
+            if (!session) {
+                return Response.redirect(new URL('/login', url.origin).href, 302);
+            }
+            return serve(env, request, 'dashboard.html');
+        }
+
+        if (url.pathname === '/login') {
+            if (session) {
+                return Response.redirect(new URL('/dashboard', url.origin).href, 302);
+            }
+            return serve(env, request, 'login.html');
         }
 
         if (url.pathname === '/') {
-            return env.ASSETS.fetch(new URL('/index.html', request.url));
+            return serve(env, request, 'index.html');
         }
 
         return env.ASSETS.fetch(request);
     }
 };
 
-async function deployPages(
-    env: Env,
-    account: CFAccount,
-    workerName: string,
-    namespaceId: string,
-    databaseId: string,
-    logger: StreamLogger,
-    preRelease: boolean,
-    displayName: string,
-) {
-    const { success, error, complete } = logger;
-
-    const { script, path } = await buildScript(account, workerName, 'pages.dev', '_worker.js', preRelease);
-    success('Script built successfully!');
-
-    const subdomain = await account.createPagesProject(workerName, namespaceId, databaseId);
-    success('Pages project created successfully!');
-
-    await account.deployPages(workerName, script);
-    success('Pages deployed successfully!');
-
-    // Write the panel's record now, so it is manageable from the dashboard
-    // before anyone opens it, and its links are known without guesswork.
-    let portal = '';
-    try {
-        const record = await seedPanelRecord(account.token, account.id, namespaceId, databaseId, {
-            displayName,
-            panelHost: subdomain,
-            panelPath: path
-        });
-        portal = `https://${subdomain}/${path}/sub/${record.subToken}`;
-        success('Panel record created!');
-    } catch (err) {
-        error(`Could not write the panel record: ${err}`);
-    }
-
-    const url = new URL(`https://${subdomain}/${path}/panel`);
-    const payload = {
-        url: url.href,
-        portal,
-        name: displayName,
-        user: account.email,
-        key: await encrypt(account.token, env.SECRET)
-    }
-
-    complete(JSON.stringify(payload));
+function serve(env: Env, request: Request, page: string): Promise<Response> {
+    return env.ASSETS.fetch(new URL(`/${page}`, request.url));
 }
 
-async function deployWorkers(
-    env: Env,
-    account: CFAccount,
-    workerName: string,
-    namespaceId: string,
-    databaseId: string,
-    logger: StreamLogger,
-    preRelease: boolean,
-    displayName: string
-) {
-    const { success, error, complete } = logger;
-    let subdomain: string;
+/* ------------------------------------------------------------------ routes */
+
+async function handleApi(request: Request, env: Env, session: { userId: string; email: string }): Promise<Response> {
+    const url = new URL(request.url);
+    const route = url.pathname.replace(/^\/api\/?/, '');
+    const body = await request.json().catch(() => ({})) as Record<string, any>;
+
     try {
-        subdomain = await account.getWorkersDevSubdomain();
-        success('Account workers subdomain is available!');
+        switch (true) {
+            case route === 'me':
+                return json({ success: true, body: { email: session.email } });
+
+            case route === 'connections':
+                return json({ success: true, body: { connections: await listConnections(env, session.userId) } });
+
+            case route === 'connections/add':
+                return json({ success: true, body: { connection: await addConnection(env, session.userId, body) } });
+
+            case route === 'connections/update':
+                await updateConnection(env, session.userId, String(body.id ?? ''), body);
+                return json({ success: true, message: 'Connection updated.' });
+
+            case route === 'connections/delete':
+                await deleteConnection(env, session.userId, String(body.id ?? ''));
+                return json({ success: true, message: 'Connection removed.' });
+
+            case route === 'profiles':
+                return json({ success: true, body: { profiles: await listProfiles(env, session.userId) } });
+
+            case route === 'profiles/save':
+                return json({ success: true, body: { profile: await saveProfile(env, session.userId, body.profile ?? {}) } });
+
+            case route === 'profiles/delete':
+                await deleteProfile(env, session.userId, String(body.id ?? ''));
+                return json({ success: true, message: 'Profile deleted.' });
+
+            default:
+                return json({ success: false, message: `Unknown route: ${route}` }, 404);
+        }
     } catch (error) {
-        subdomain = await account.createWorkersDevSubdomain();
-        success('Fresh account, Workers subdomain created successfully!');
+        return json({ success: false, message: error instanceof Error ? error.message : String(error) }, 400);
     }
-
-    const { script, path } = await buildScript(account, workerName, subdomain, 'worker.js', preRelease);
-    success('Script built successfully!');
-
-    await account.deployWorker(workerName, script, namespaceId, databaseId);
-    success('Worker deployed successfully!');
-
-    await account.enableSubdomain(workerName);
-    success('Worker subdomain enabled successfully!');
-
-    const host = `${workerName}.${subdomain}`;
-
-    let portal = '';
-    try {
-        const record = await seedPanelRecord(account.token, account.id, namespaceId, databaseId, {
-            displayName,
-            panelHost: host,
-            panelPath: path
-        });
-        portal = `https://${host}/${path}/sub/${record.subToken}`;
-        success('Panel record created!');
-    } catch (err) {
-        error(`Could not write the panel record: ${err}`);
-    }
-
-    const url = new URL(`https://${host}/${path}/panel`);
-    const payload = {
-        url: url.href,
-        portal,
-        name: displayName,
-        user: account.email,
-        key: await encrypt(account.token, env.SECRET)
-    }
-
-    complete(JSON.stringify(payload));
 }
 
-/* ==========================================================================
-   Panel management API
+/* ----------------------------------------------------------------- install */
 
-   The request handling lives in handle-manage.ts so the local edition runs
-   exactly the same code. This layer only supplies the token: either the
-   `key` handed out at install time (encrypted with env.SECRET so it never
-   travels in the clear) or a token typed into the dashboard.
-   ========================================================================== */
-
-async function handleManage(request: Request, env: Env, url: URL): Promise<Response> {
-    if (request.method !== 'POST') {
-        return json({ success: false, message: 'Method not allowed.' }, 405);
+/**
+ * Streams NDJSON install events. Open to anyone with a Cloudflare token —
+ * the install page has no account. The final `complete` event carries every
+ * installed panel's links and Dashboard API key.
+ */
+async function handleInstall(request: Request, env: Env): Promise<Response> {
+    const origin = request.headers.get('Origin');
+    if (origin && origin !== new URL(request.url).origin) {
+        return json({ success: false, message: 'Unauthorized context.' }, 403);
     }
 
-    const action = url.pathname.replace('/api/manage/', '');
-    const body = await request.json().catch(() => ({})) as ManageRequest;
+    const logger = createStreamLogger();
+    const { readable, info, error, complete, close } = logger;
 
-    const result = await handleManageRequest(action, body, async payload =>
-        payload.key ? await decrypt(payload.key, env.SECRET) : (payload.token ?? '')
-    );
+    (async () => {
+        try {
+            const formData = await request.formData();
+            const apiToken = formData.get('apiToken')?.toString().trim() ?? '';
+            const deployType = formData.get('deployType')?.toString() || 'workers';
+            const displayName = formData.get('displayName')?.toString().trim().slice(0, 40) ?? '';
+            const count = parseInt(formData.get('count')?.toString() || '1', 10) || 1;
+            const preRelease = formData.get('preRelease')?.toString() === 'true';
 
-    return json(result.payload, result.status);
-}
+            if (!apiToken) throw new Error('Missing Cloudflare API token.');
 
-function json(payload: unknown, status = 200): Response {
-    return new Response(JSON.stringify(payload), {
-        status,
-        headers: { 'Content-Type': 'application/json' }
+            const account = await CFAccount.create(apiToken);
+            info(`Signed in as ${account.email}.`);
+
+            const results = await installPanels(env, account, {
+                token: apiToken, deployType, displayName, count, preRelease
+            }, logger);
+
+            complete(JSON.stringify({ user: account.email, results }));
+        } catch (err) {
+            error(`Install failed: ${err instanceof Error ? err.message : err}`);
+        } finally {
+            close();
+        }
+    })();
+
+    return new Response(readable, {
+        headers: { 'Content-Type': 'application/x-ndjson' }
     });
 }

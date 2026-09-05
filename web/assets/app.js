@@ -1,22 +1,23 @@
+/* ==========================================================================
+   ZAGROOO Wizard — install page.
+
+   One token, one form, any number of panels. Each installed panel returns an
+   API key for the dashboard's API page; nothing else is kept.
+   ========================================================================== */
+
 const deployForm = document.getElementById('deployForm');
 const togglePass = document.getElementById('togglePassword');
-const closeDeploymentToast = document.getElementById('closeDeploymentToast');
-const closePrivateUrlToast = document.getElementById('closePrivateUrlToast');
-const copyURL = document.getElementById('copyURL');
 const out = document.getElementById('output');
+const results = document.getElementById('results');
 
 document.addEventListener('DOMContentLoaded', () => {
     const permissions = [
         { key: 'workers_scripts', type: 'edit' },
-        { key: 'workers_kv_storage', type: 'edit' },
-        // Usage accounting lives in D1. Without this the panel silently falls
-        // back to KV, which allows far fewer writes per day.
+        // Every panel of the account shares one D1 database.
         { key: 'd1', type: 'edit' },
         { key: 'page', type: 'edit' },
+        // The panel itself uses the token later for custom domains.
         { key: 'dns', type: 'edit' },
-        // The dashboard's account request-quota bar reads Workers analytics.
-        // Without this the query is denied and the bar reads a reassuring 0%.
-        { key: 'account_analytics', type: 'read' },
         { key: 'user_details', type: 'read' }
     ];
 
@@ -27,30 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
     url.searchParams.set('zoneId', 'all');
     url.searchParams.set('name', 'ZAGROOO-Wizard');
     document.getElementById('tokenTemplate').href = url.href;
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const key = urlParams.get('key');
-    const user = urlParams.get('user');
-    if (key && user) {
-        globalThis.isPrivateLink = true;
-        const userElm = document.getElementById('user');
-        document.getElementById('apiToken').removeAttribute('required');
-        document.getElementById('apiTokenGroup').style.display = 'none';
-        document.getElementById('steps').style.display = 'none';
-        userElm.textContent = `Welcome ${user}`;
-        userElm.style.display = 'block';
-    }
-});
-
-copyURL.addEventListener('click', () => {
-    const { user, key } = globalThis;
-    const url = new URL(window.location.href);
-    url.searchParams.set('user', user);
-    url.searchParams.set('key', key);
-    if (!globalThis.key || !globalThis.user) return;
-
-    navigator.clipboard.writeText(url.href)
-        .catch(() => log('error', 'Could not copy the private link.'));
 });
 
 togglePass.addEventListener('click', () => {
@@ -65,92 +42,116 @@ togglePass.addEventListener('click', () => {
 
 deployForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const payload = new FormData(deployForm);
-    await startDeploymentPipeline(payload);
-});
-
-closeDeploymentToast.addEventListener('click', () => {
-    document.getElementById('deploymentToast').style.display = 'none';
-});
-
-closePrivateUrlToast.addEventListener('click', () => {
-    document.getElementById('privateUrlToast').style.display = 'none';
+    await startDeploymentPipeline(new FormData(deployForm));
 });
 
 async function startDeploymentPipeline(payload) {
+    const submitButton = deployForm.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    results.hidden = true;
+    results.innerHTML = '';
+    out.textContent = '';
+
     try {
-        const response = await fetch(`/api/deploy${location.search}`, {
+        const response = await fetch('/api/install', {
             method: 'POST',
             body: payload
         });
 
-        if (!response.ok) {
-            throw new Error(`Pipeline transmission responded with code: ${response.status}`);
+        if (!response.ok || !response.body) {
+            throw new Error(`The wizard returned ${response.status}.`);
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
-        while (true) {
+        for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
+            let newlineAt;
 
-            for (const line of lines) {
-                if (!line.trim()) continue;
-                const { type, message } = JSON.parse(line);
-                const handlers = {
-                    success: () => {
-                        log('success', message);
-                    },
-                    info: () => {
-                        log('info', message);
-                    },
-                    error: () => {
-                        log('error', message);
-                        log('info', 'Standby...\n');
-                    },
-                    complete: () => {
-                        log('success', 'ZAGROOO Panel successfully installed!\n');
-                        if (message) {
-                            const payload = JSON.parse(message);
-                            log('info', 'Panel URL: ', payload.url);
+            while ((newlineAt = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, newlineAt).trim();
+                buffer = buffer.slice(newlineAt + 1);
+                if (!line) continue;
 
-                            if (!globalThis.isPrivateLink) {
-                                globalThis.key = payload.key;
-                                globalThis.user = payload.user;
+                let event;
+                try {
+                    event = JSON.parse(line);
+                } catch (err) {
+                    continue;
+                }
 
-                                const privateUrlToast = document.getElementById('privateUrlToast');
-                                privateUrlToast.style.display = 'flex';
-                            }
-
-                            const deploymentToast = document.getElementById('deploymentToast');
-                            const link = document.getElementById('liveUrl');
-
-                            if (link) {
-                                link.href = payload.url;
-                            }
-
-                            deploymentToast.style.display = 'flex';
-                        }
-
-                        log('info', 'Standby...\n');
-                    }
-                };
-
-                handlers[type]?.();
+                const { type, message } = event;
+                if (type === 'complete') {
+                    showResults(JSON.parse(message));
+                } else {
+                    log(type, message);
+                }
             }
         }
+
+        log('info', 'Standby...\n');
     } catch (err) {
-        // log(type, message) — passing the sentence as the type made
-        // LABEL_GLYPHS[type] undefined, which threw inside this catch and left
-        // the operator staring at an empty terminal after a failed install.
         log('error', 'Installation failed: ' + (err && err.message ? err.message : err));
+    } finally {
+        submitButton.disabled = false;
     }
+}
+
+function showResults(payload) {
+    const list = (payload && payload.results) || [];
+    if (!list.length) return;
+
+    const nodes = list.map(item => {
+        const state = item.error
+            ? `<span class="result-state is-error">failed</span>`
+            : `<span class="result-state is-ok">ready</span>`;
+
+        const key = item.apiKey
+            ? `<div class="result-key">
+                   <code>${item.apiKey}</code>
+                   <button type="button" class="copy-key" data-key="${item.apiKey}">Copy API key</button>
+               </div>`
+            : '';
+
+        const links = [
+            item.url ? `<a href="${item.url}" target="_blank" rel="noopener">Panel</a>` : '',
+            item.portal ? `<a href="${item.portal}" target="_blank" rel="noopener">Portal</a>` : ''
+        ].filter(Boolean).join(' · ');
+
+        return `<div class="result-item">
+            <div class="result-head">
+                <strong>${item.name}</strong>
+                ${state}
+                <span class="result-links">${links}</span>
+            </div>
+            ${key}
+            ${item.error ? `<p class="result-error">${item.error}</p>` : ''}
+        </div>`;
+    });
+
+    results.innerHTML = `
+        <h4>Installed panels</h4>
+        <p class="results-hint">Copy each API key and add the panel on the
+        <a href="/dashboard">dashboard's API page</a>. Keys are shown once.</p>
+        ${nodes.join('')}`;
+    results.hidden = false;
+
+    results.querySelectorAll('.copy-key').forEach(button => {
+        button.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(button.dataset.key);
+                button.textContent = 'Copied!';
+                setTimeout(() => { button.textContent = 'Copy API key'; }, 1500);
+            } catch (error) {
+                button.textContent = 'Copy failed';
+            }
+        });
+    });
 }
 
 const LABEL_GLYPHS = {

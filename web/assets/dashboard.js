@@ -1,40 +1,57 @@
 /* ==========================================================================
    ZAGROOO Wizard dashboard
 
-   Every request goes through /api/manage/*, which both the hosted worker and
-   the local server expose, running the same code. Credentials live in memory
-   for the session only: either the `key` from a private install link, or a
-   token typed in here.
+   Panels are added on the API tab with a panel address and an API key. The
+   browser then talks to each panel's API directly — the panel serves CORS
+   headers for exactly this. Profiles live server-side, scoped to the signed-in
+   user.
    ========================================================================== */
 
 const GB = 1024 ** 3;
 const PAGE_SIZE = 12;
 const DAY = 86400000;
 
-const credential = {};
-let panels = [];
-let filtered = [];
+let connections = [];
 let details = new Map();
 let selected = new Set();
 let profiles = [];
 let page = 0;
 let current = null;
 let currentProfile = null;
+let currentConnection = null;
 let pendingSettings = null;
 
 const $ = id => document.getElementById(id);
 
 /* -------------------------------------------------------------- transport */
 
-async function manage(action, payload = {}) {
-    const res = await fetch(`/api/manage/${action}`, {
+async function wizardApi(route, payload = {}) {
+    const res = await fetch(`/api/${route}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...credential, ...payload })
+        body: JSON.stringify(payload)
     });
 
     const data = await res.json();
     if (!data.success) throw new Error(data.message || `Request failed (${res.status})`);
+    return data.body ?? {};
+}
+
+/** Calls a panel's API straight from the browser with its own key. */
+async function panelApi(connection, path, options = {}) {
+    const res = await fetch(`${connection.api_url}/${path}`, {
+        ...options,
+        headers: {
+            'Authorization': `Bearer ${connection.api_key}`,
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers ?? {})
+        }
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!data || data.success === false) {
+        throw new Error(data?.message || `Panel returned ${res.status}`);
+    }
     return data.body ?? {};
 }
 
@@ -76,107 +93,125 @@ function toast(message) {
 
 /* ------------------------------------------------------------------ boot */
 
-(function boot() {
-    // A private install link carries ?key=… — reuse it so the operator does
-    // not have to paste a token at all.
-    const key = new URLSearchParams(location.search).get('key');
-    if (key) {
-        credential.key = key;
-        connect();
+(async function boot() {
+    try {
+        const me = await wizardApi('me');
+        $('account').textContent = me.email;
+
+        await loadProfiles();
+        await loadConnections();
+    } catch (error) {
+        location.href = '/login';
     }
 })();
 
-$('connect').addEventListener('click', () => {
-    const token = $('token').value.trim();
-    if (!token) {
-        toast('Paste a Cloudflare API token first.');
-        return;
-    }
-
-    credential.token = token;
-    connect();
+$('logout').addEventListener('click', async () => {
+    await wizardApi('auth/logout').catch(() => null);
+    location.href = '/login';
 });
 
-$('token').addEventListener('keydown', event => {
-    if (event.key === 'Enter') $('connect').click();
-});
-
-async function connect() {
-    try {
-        const account = await manage('account');
-        $('account').textContent = account.email;
-        $('connect-card').hidden = true;
-        $('tabs').hidden = false;
-        $('panels-section').hidden = false;
-        $('quota-card').hidden = false;
-
-        await loadPanels();
-        await Promise.all([loadProfiles(), loadAccountUsage()]);
-    } catch (error) {
-        toast(String(error.message || error));
-    }
-}
-
-/* --------------------------------------------------------- account quota */
-
-async function loadAccountUsage() {
-    try {
-        const usage = await manage('account-usage');
-        const pct = usage.percent;
-
-        $('quota-bar').style.width = `${pct}%`;
-        $('quota-bar').className = barClass(pct);
-        $('quota-text').textContent =
-            `${usage.requests.toLocaleString()} of ${usage.limit.toLocaleString()} requests in the last 24 hours`;
-
-        const pill = $('quota-pill');
-        pill.textContent = `${pct.toFixed(1)}%`;
-        pill.className = pct >= 90 ? 'pill is-danger' : pct >= 70 ? 'pill is-warn' : 'pill';
-    } catch (error) {
-        // An unknown quota is not a safe quota — say so rather than leaving an
-        // empty bar that reads as healthy.
-        $('quota-bar').style.width = '0%';
-        $('quota-text').textContent = `Account usage unknown — ${error.message || error}`;
-
-        const pill = $('quota-pill');
-        pill.textContent = 'unknown';
-        pill.className = 'pill is-warn';
-    }
-}
-
-/* ----------------------------------------------------------------- tabs */
+/* ------------------------------------------------------------------ tabs */
 
 $('tabs').addEventListener('click', event => {
     const tab = event.target.closest('.tab');
     if (!tab) return;
 
-    document.querySelectorAll('.tab').forEach(node => node.classList.remove('is-active'));
+    document.querySelectorAll('#tabs .tab').forEach(node => node.classList.remove('is-active'));
     tab.classList.add('is-active');
 
-    $('panels-section').hidden = tab.dataset.tab !== 'panels';
+    $('api-section').hidden = tab.dataset.tab !== 'api';
     $('zagiro-section').hidden = tab.dataset.tab !== 'zagiro';
     $('templates-section').hidden = tab.dataset.tab !== 'templates';
 });
 
-/* ---------------------------------------------------------------- listing */
+/* ----------------------------------------------------------- connections */
 
-async function loadPanels() {
+async function loadConnections() {
     $('panels').innerHTML = '<div class="empty">Loading panels…</div>';
 
     try {
-        const body = await manage('panels');
-        panels = body.panels || [];
+        const body = await wizardApi('connections');
+        connections = body.connections || [];
         details = new Map();
         selected = new Set();
         applyFilter();
+        renderProfileSelects();
     } catch (error) {
         $('panels').innerHTML = `<div class="empty">${error.message || error}</div>`;
     }
 }
 
-function sortPanels(list) {
+function connId(connection) {
+    return `conn-${connection.id}`;
+}
+
+function connectionOfId(id) {
+    return connections.find(connection => connId(connection) === id);
+}
+
+/* ------------------------------------------------------------- add panel */
+
+$('conn-add').addEventListener('click', () => {
+    $('conn-title').textContent = 'Add a panel';
+    $('c-label').value = '';
+    $('c-url').value = '';
+    $('c-key').value = '';
+    $('conn-status').textContent = '';
+    $('conn-modal').hidden = false;
+});
+
+$('conn-close').addEventListener('click', () => {
+    $('conn-modal').hidden = true;
+});
+
+$('conn-save').addEventListener('click', async () => {
+    const payload = {
+        label: $('c-label').value.trim(),
+        apiUrl: $('c-url').value.trim(),
+        apiKey: $('c-key').value.trim()
+    };
+
+    if (!payload.label || !payload.apiUrl || !payload.apiKey) {
+        $('conn-status').textContent = 'Fill in every field.';
+        return;
+    }
+
+    $('conn-status').textContent = 'Testing the connection…';
+
+    try {
+        // Prove the key works against this exact panel before saving it.
+        const probe = await fetch(`${normaliseApiUrl(payload.apiUrl)}/status`, {
+            headers: { 'Authorization': `Bearer ${payload.apiKey}` }
+        });
+        const data = await probe.json().catch(() => null);
+        if (!data?.success) {
+            $('conn-status').textContent = data?.message || `Panel returned ${probe.status}.`;
+            return;
+        }
+
+        await wizardApi('connections/add', payload);
+        $('conn-modal').hidden = true;
+        toast('Panel connected.');
+        await loadConnections();
+    } catch (error) {
+        $('conn-status').textContent = error.message || error;
+    }
+});
+
+/** Mirrors the server-side normalisation so the probe hits the same URL. */
+function normaliseApiUrl(raw) {
+    let url = raw.trim().replace(/\/+$/, '');
+    if (!/^https:\/\//i.test(url)) url = `https://${url}`;
+    url = url.replace(/\/panel$/, '/api');
+    if (!/\/api$/.test(url)) url = `${url}/api`;
+    return url;
+}
+
+/* ------------------------------------------------------------- rendering */
+
+function sortConnections(list) {
     const mode = $('sort').value;
-    const detailOf = panel => details.get(cardId(panel)) || {};
+    const detailOf = connection => details.get(connId(connection)) || {};
     const copy = [...list];
 
     if (mode === 'usage') {
@@ -185,10 +220,10 @@ function sortPanels(list) {
         copy.sort((a, b) =>
             ((detailOf(a).limits || {}).expireAt || Infinity) - ((detailOf(b).limits || {}).expireAt || Infinity));
     } else if (mode === 'status') {
-        const rank = panel => (detailOf(panel).status === 'active' ? 1 : 0);
+        const rank = connection => (detailOf(connection).status === 'active' ? 1 : 0);
         copy.sort((a, b) => rank(a) - rank(b));
     } else {
-        copy.sort((a, b) => a.name.localeCompare(b.name));
+        copy.sort((a, b) => a.label.localeCompare(b.label));
     }
 
     return copy;
@@ -197,24 +232,25 @@ function sortPanels(list) {
 function applyFilter() {
     const query = $('search').value.trim().toLowerCase();
     const matches = query
-        ? panels.filter(panel => {
-            const detail = details.get(cardId(panel)) || {};
+        ? connections.filter(connection => {
+            const detail = details.get(connId(connection)) || {};
             const name = ((detail.limits || {}).displayName || '').toLowerCase();
-            return panel.name.toLowerCase().includes(query) || name.includes(query);
+            return connection.label.toLowerCase().includes(query) || name.includes(query);
         })
-        : panels;
+        : connections;
 
-    filtered = sortPanels(matches);
+    filtered = sortConnections(matches);
 
-    // Selection used to survive filtering while selectedPanels() resolved
-    // against the unfiltered list, so a bulk action could hit panels the
-    // operator could not see. Keep only what is still in view.
-    const visible = new Set(filtered.map(cardId));
+    // Selection never outlives its filter — a bulk action can only hit what
+    // the operator can see.
+    const visible = new Set(filtered.map(connId));
     selected = new Set([...selected].filter(id => visible.has(id)));
 
     page = 0;
     renderPage();
 }
+
+let filtered = [];
 
 function renderPage() {
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -227,30 +263,29 @@ function renderPage() {
     $('bulkbar').hidden = filtered.length === 0;
 
     if (!slice.length) {
-        $('panels').innerHTML = '<div class="empty">No ZAGROOO panels found on this account.</div>';
+        $('panels').innerHTML = '<div class="empty">No panels yet — add one with “Add panel”, or install from the wizard’s front page.</div>';
         return;
     }
 
     $('panels').innerHTML = slice.map(cardMarkup).join('');
     updateSelectionUi();
 
-    // Stats are fetched lazily so a hundred panels do not mean a hundred
-    // blocking round trips before anything renders.
-    slice.forEach(panel => {
-        const cached = details.get(cardId(panel));
-        if (cached) paintDetail(panel, cached); else loadDetail(panel);
+    // Details load lazily, so fifty panels do not mean fifty blocking calls.
+    slice.forEach(connection => {
+        const cached = details.get(connId(connection));
+        if (cached) paintDetail(connection, cached); else loadDetail(connection);
     });
 }
 
-function cardMarkup(panel) {
-    const id = cardId(panel);
+function cardMarkup(connection) {
+    const id = connId(connection);
     return `<article class="panel-card" id="${id}">
         <div class="panel-card-head">
             <label class="check-inline">
                 <input type="checkbox" class="select-panel" data-id="${id}" ${selected.has(id) ? 'checked' : ''} />
                 <span>
-                    <strong data-role="title">${panel.name}</strong>
-                    <span class="panel-meta">${panel.deployType}${panel.hasD1 ? ' · D1' : ' · KV'}<span data-role="profile"></span></span>
+                    <strong data-role="title">${connection.label}</strong>
+                    <span class="panel-meta" data-role="meta"></span>
                 </span>
             </label>
             <span class="pill is-muted" data-role="status">loading</span>
@@ -263,27 +298,40 @@ function cardMarkup(panel) {
     </article>`;
 }
 
-function cardId(panel) {
-    return `panel-${panel.deployType}-${panel.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-}
-
-function panelOfId(id) {
-    return panels.find(panel => cardId(panel) === id);
-}
-
-async function loadDetail(panel) {
+async function loadDetail(connection) {
     try {
-        const detail = await manage('detail', { panel });
-        details.set(cardId(panel), detail);
-        paintDetail(panel, detail);
+        const body = await panelApi(connection, 'status');
+        const detail = {
+            name: connection.label,
+            connection,
+            status: body.status || 'unknown',
+            limits: body.limits || {},
+            usage: {
+                totalBytes: (body.usage || {}).total ?? 0,
+                dailyBytes: (body.usage || {}).daily ?? 0
+            },
+            panelUrl: body.panel?.host ? `https://${body.panel.host}` : ''
+        };
+
+        details.set(connId(connection), detail);
+        paintDetail(connection, detail);
     } catch (error) {
-        const card = document.getElementById(cardId(panel));
-        if (card) card.querySelector('[data-role="status"]').textContent = 'error';
+        const detail = {
+            name: connection.label,
+            connection,
+            status: 'unknown',
+            limits: {},
+            usage: {},
+            error: error.message || String(error)
+        };
+
+        details.set(connId(connection), detail);
+        paintDetail(connection, detail);
     }
 }
 
-function paintDetail(panel, detail) {
-    const card = document.getElementById(cardId(panel));
+function paintDetail(connection, detail) {
+    const card = document.getElementById(connId(connection));
     if (!card) return;
 
     const limits = detail.limits || {};
@@ -292,10 +340,10 @@ function paintDetail(panel, detail) {
     const pct = limits.limitTotalBytes ? Math.min(100, (total / limits.limitTotalBytes) * 100) : 0;
 
     if (limits.displayName) {
-        card.querySelector('[data-role="title"]').textContent = `${limits.displayName} · ${panel.name}`;
+        card.querySelector('[data-role="title"]').textContent = `${limits.displayName} · ${connection.label}`;
     }
 
-    card.querySelector('[data-role="profile"]').textContent = limits.zagiroName ? ` · ${limits.zagiroName}` : '';
+    card.querySelector('[data-role="meta"]').textContent = limits.zagiroName ? ` · ${limits.zagiroName}` : '';
 
     const status = card.querySelector('[data-role="status"]');
     status.textContent = detail.status;
@@ -316,20 +364,11 @@ function paintDetail(panel, detail) {
     bar.style.width = `${pct}%`;
     bar.className = barClass(pct);
 
-    const links = [`<button type="button" data-edit="${cardId(panel)}">Manage</button>`];
+    const host = detail.panelUrl;
+    const links = [`<button type="button" data-edit="${connId(connection)}">Manage</button>`];
 
-    if (detail.panelUrl) {
-        links.push(`<a href="${detail.panelUrl}" target="_blank" rel="noopener">Panel ↗</a>`);
-        links.push(`<button type="button" data-copy="${detail.panelUrl}">Copy panel</button>`);
-    }
-
-    if (detail.portalUrl) {
-        links.push(`<a href="${detail.portalUrl}" target="_blank" rel="noopener">Portal ↗</a>`);
-        links.push(`<button type="button" data-copy="${detail.portalUrl}">Copy portal</button>`);
-    }
-
-    if (!detail.panelUrl || !detail.portalUrl) {
-        links.push(`<button type="button" data-repair="${cardId(panel)}">Repair links</button>`);
+    if (host) {
+        links.push(`<a href="${host}" target="_blank" rel="noopener">Panel ↗</a>`);
     }
 
     if (detail.error) links.push(`<span class="small">${detail.error}</span>`);
@@ -357,10 +396,8 @@ document.addEventListener('change', event => {
     }
 
     if (event.target.id === 'select-all') {
-        // Everything matching the current filter, not just the current page —
-        // otherwise the count and the checkbox disagree across pages.
         if (event.target.checked) {
-            filtered.forEach(panel => selected.add(cardId(panel)));
+            filtered.forEach(connection => selected.add(connId(connection)));
         } else {
             selected.clear();
         }
@@ -373,40 +410,14 @@ document.addEventListener('change', event => {
     }
 });
 
-function selectedPanels() {
-    // Resolve against the filtered list, so a bulk action can only ever touch
-    // panels the operator can actually see.
-    const visible = new Map(filtered.map(panel => [cardId(panel), panel]));
+function selectedConnections() {
+    const visible = new Map(filtered.map(connection => [connId(connection), connection]));
     return [...selected].map(id => visible.get(id)).filter(Boolean);
 }
 
-/* --------------------------------------------------------------- actions */
+/* ---------------------------------------------------------------- editor */
 
 document.addEventListener('click', async event => {
-    const copyBtn = event.target.closest('[data-copy]');
-    if (copyBtn) {
-        try {
-            await navigator.clipboard.writeText(copyBtn.dataset.copy);
-            toast('Copied');
-        } catch (error) {
-            toast('Copy failed');
-        }
-        return;
-    }
-
-    const repairBtn = event.target.closest('[data-repair]');
-    if (repairBtn) {
-        const panel = panelOfId(repairBtn.dataset.repair);
-        try {
-            await manage('repair', { panel });
-            toast('Links repaired.');
-            await loadDetail(panel);
-        } catch (error) {
-            toast(String(error.message || error));
-        }
-        return;
-    }
-
     const editBtn = event.target.closest('[data-edit]');
     if (editBtn) {
         openEditor(editBtn.dataset.edit);
@@ -451,17 +462,16 @@ document.addEventListener('click', async event => {
     }
 });
 
-/* ---------------------------------------------------------- panel editor */
-
 function openEditor(id) {
     const detail = details.get(id);
     if (!detail) return;
 
     current = detail;
+    currentConnection = detail.connection;
     const limits = detail.limits || {};
 
     $('edit-title').textContent =
-        `${limits.displayName ? limits.displayName + ' · ' : ''}${detail.name} · ${detail.host || detail.deployType}`;
+        `${limits.displayName ? limits.displayName + ' · ' : ''}${detail.name}`;
     $('f-name').value = limits.displayName || '';
     $('f-total').value = limits.limitTotalBytes ? +(limits.limitTotalBytes / GB).toFixed(2) : 0;
     $('f-daily').value = limits.limitDailyBytes ? +(limits.limitDailyBytes / GB).toFixed(2) : 0;
@@ -475,7 +485,6 @@ function openEditor(id) {
     $('f-status-nodes').checked = limits.showStatusNodes !== false;
     $('f-expiry').value = limits.expireAt ? new Date(limits.expireAt).toISOString().split('T')[0] : '';
     $('edit-pause').textContent = limits.isPaused ? 'Resume' : 'Pause';
-    $('edit-addd1').hidden = Boolean(detail.hasD1);
 
     renderPlanButtons();
     $('edit-modal').hidden = false;
@@ -503,16 +512,6 @@ function fillFromProfile(profile) {
     toast(`Filled from ${profile.name}`);
 }
 
-function panelRef(detail) {
-    return {
-        name: detail.name,
-        deployType: detail.deployType,
-        modifiedOn: detail.modifiedOn,
-        hasKv: detail.hasKv,
-        hasD1: detail.hasD1
-    };
-}
-
 function limitsFromForm() {
     const expiry = $('f-expiry').value;
     return {
@@ -532,67 +531,92 @@ function limitsFromForm() {
     };
 }
 
-$('edit-save').addEventListener('click', () =>
-    runAction('limits', { panel: panelRef(current), patch: limitsFromForm() }, 'Limits saved.'));
+$('edit-save').addEventListener('click', async () => {
+    if (!currentConnection) return;
+    try {
+        await panelApi(currentConnection, 'limits', {
+            method: 'PATCH',
+            body: JSON.stringify(limitsFromForm())
+        });
+        toast('Limits saved.');
+        await refreshCurrent();
+    } catch (error) {
+        toast(String(error.message || error));
+    }
+});
 
-$('edit-pause').addEventListener('click', () => {
+$('edit-pause').addEventListener('click', async () => {
+    if (!currentConnection) return;
     const paused = !(current.limits && current.limits.isPaused);
-    runAction('pause', { panel: panelRef(current), paused }, paused ? 'Panel paused.' : 'Panel resumed.');
+    try {
+        await panelApi(currentConnection, paused ? 'pause' : 'resume', {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        toast(paused ? 'Panel paused.' : 'Panel resumed.');
+        await refreshCurrent();
+    } catch (error) {
+        toast(String(error.message || error));
+    }
 });
 
-$('edit-reset').addEventListener('click', () => {
+$('edit-reset').addEventListener('click', async () => {
+    if (!currentConnection) return;
     if (!confirm(`Reset all usage counters for ${current.name}? This cannot be undone.`)) return;
-    runAction('reset-usage', { panel: panelRef(current), scope: 'all' }, 'Usage reset.');
-});
-
-$('edit-repair').addEventListener('click', () =>
-    runAction('repair', { panel: panelRef(current) }, 'Links repaired.'));
-
-$('edit-update').addEventListener('click', () => {
-    if (!confirm(`Update ${current.name} to the latest release?`)) return;
-    runAction('update-panel', { panel: panelRef(current) }, 'Panel updated.');
-});
-
-$('edit-addd1').addEventListener('click', () => {
-    if (!confirm(`Attach a D1 database to ${current.name} and redeploy it?`)) return;
-    runAction('add-d1', { panel: panelRef(current) }, 'D1 attached.');
-});
-
-$('edit-delete').addEventListener('click', async () => {
-    if (!confirm(`Permanently delete ${current.name} from Cloudflare? This cannot be undone.`)) return;
 
     try {
-        await manage('delete', { panel: panelRef(current) });
-        toast('Panel deleted.');
+        await panelApi(currentConnection, 'reset-usage', {
+            method: 'POST',
+            body: JSON.stringify({ scope: 'all' })
+        });
+        toast('Usage reset.');
+        await refreshCurrent();
+    } catch (error) {
+        toast(String(error.message || error));
+    }
+});
+
+$('edit-update').addEventListener('click', async () => {
+    if (!currentConnection) return;
+    if (!confirm(`Update ${current.name} to the latest release? The panel redeploys itself and is back in a few seconds.`)) return;
+
+    try {
+        await panelApi(currentConnection, 'update', { method: 'POST', body: JSON.stringify({}) });
+        toast('Panel updated.');
+        await refreshCurrent();
+    } catch (error) {
+        toast(String(error.message || error));
+    }
+});
+
+$('edit-forget').addEventListener('click', async () => {
+    if (!currentConnection) return;
+    if (!confirm(`Remove ${current.name} from this dashboard? The panel itself is NOT deleted — it keeps running.`)) return;
+
+    try {
+        await wizardApi('connections/delete', { id: currentConnection.id });
+        toast('Connection removed.');
         $('edit-modal').hidden = true;
-        await loadPanels();
+        await loadConnections();
     } catch (error) {
         toast(String(error.message || error));
     }
 });
 
-async function runAction(action, payload, okMessage) {
-    if (!current) return;
-
-    try {
-        await manage(action, payload);
-        toast(okMessage);
-
-        const refreshed = await manage('detail', { panel: panelRef(current) });
-        details.set(cardId(current), refreshed);
-        current = refreshed;
-        paintDetail(current, refreshed);
-        $('edit-pause').textContent = (refreshed.limits || {}).isPaused ? 'Resume' : 'Pause';
-        $('edit-addd1').hidden = Boolean(refreshed.hasD1);
-    } catch (error) {
-        toast(String(error.message || error));
-    }
+async function refreshCurrent() {
+    if (!currentConnection) return;
+    current = null;
+    await loadDetail(currentConnection);
+    const refreshed = details.get(connId(currentConnection));
+    current = refreshed;
+    currentConnection = refreshed.connection;
+    $('edit-pause').textContent = (refreshed.limits || {}).isPaused ? 'Resume' : 'Pause';
 }
 
 /* ---------------------------------------------------------- bulk actions */
 
 async function bulk(label, worker, { staged = false } = {}) {
-    const targets = selectedPanels();
+    const targets = selectedConnections();
     if (!targets.length) {
         toast('Select some panels first.');
         return;
@@ -603,29 +627,32 @@ async function bulk(label, worker, { staged = false } = {}) {
     let done = 0;
     const failures = [];
 
-    for (const panel of targets) {
+    for (const connection of targets) {
         try {
-            await worker(panel);
+            await worker(connection);
             done++;
 
             // Staged: prove the first one survived before touching the rest,
             // so a bad release cannot take every customer down at once.
             if (staged && done === 1 && targets.length > 1) {
-                const health = await manage('health', { panel });
+                const health = await panelApi(connection, 'status')
+                    .then(() => ({ ok: true }))
+                    .catch(error => ({ ok: false, detail: error.message }));
+
                 if (!health.ok) {
-                    failures.push(`${panel.name} unhealthy after the change (${health.detail}) — stopped here`);
+                    failures.push(`${connection.label} unhealthy after the change (${health.detail}) — stopped here`);
                     break;
                 }
 
                 toast(`First panel healthy, continuing with ${targets.length - 1} more…`);
             }
         } catch (error) {
-            failures.push(`${panel.name}: ${error.message || error}`);
+            failures.push(`${connection.label}: ${error.message || error}`);
         }
     }
 
     toast(failures.length ? `${done} done, ${failures.length} failed. ${failures[0]}` : `${label}: ${done} done.`);
-    await loadPanels();
+    await loadConnections();
 }
 
 $('bulk-apply').addEventListener('click', () => {
@@ -635,34 +662,51 @@ $('bulk-apply').addEventListener('click', () => {
         return;
     }
 
-    bulk(`Apply "${profile.name}" to`, panel =>
-        manage('apply-profile', { panel, profile: profileForApply(profile) }));
+    bulk(`Apply "${profile.name}" to`, async connection => {
+        const payload = profileForApply(profile);
+
+        if (payload.limits && Object.keys(payload.limits).length) {
+            await panelApi(connection, 'limits', {
+                method: 'PATCH',
+                body: JSON.stringify({ ...payload.limits, zagiroName: payload.name })
+            });
+        }
+
+        if (payload.settings && Object.keys(payload.settings).length) {
+            await panelApi(connection, 'settings', {
+                method: 'PUT',
+                body: JSON.stringify({ settings: payload.settings })
+            });
+        }
+    });
 });
 
 $('bulk-update').addEventListener('click', () =>
-    bulk('Update', panel => manage('update-panel', { panel }), { staged: true }));
+    bulk('Update', connection => panelApi(connection, 'update', { method: 'POST', body: JSON.stringify({}) }), { staged: true }));
 
 $('bulk-pause').addEventListener('click', () =>
-    bulk('Pause', panel => manage('pause', { panel, paused: true })));
+    bulk('Pause', connection => panelApi(connection, 'pause', { method: 'POST', body: JSON.stringify({}) })));
 
 $('bulk-resume').addEventListener('click', () =>
-    bulk('Resume', panel => manage('pause', { panel, paused: false })));
+    bulk('Resume', connection => panelApi(connection, 'resume', { method: 'POST', body: JSON.stringify({}) })));
 
 $('bulk-health').addEventListener('click', async () => {
-    const targets = selectedPanels();
+    const targets = selectedConnections();
     if (!targets.length) {
         toast('Select some panels first.');
         return;
     }
 
-    const results = await Promise.all(targets.map(async panel => {
-        const health = await manage('health', { panel }).catch(error => ({ ok: false, detail: String(error) }));
-        return { panel, health };
+    const results = await Promise.all(targets.map(async connection => {
+        const health = await panelApi(connection, 'status')
+            .then(() => true)
+            .catch(() => false);
+        return { connection, health };
     }));
 
-    const bad = results.filter(result => !result.health.ok);
+    const bad = results.filter(result => !result.health);
     toast(bad.length
-        ? `${bad.length} unreachable: ${bad.map(result => result.panel.name).join(', ')}`
+        ? `${bad.length} unreachable: ${bad.map(result => result.connection.label).join(', ')}`
         : `All ${results.length} panels reachable.`);
 });
 
@@ -670,7 +714,7 @@ $('bulk-health').addEventListener('click', async () => {
 
 async function loadProfiles() {
     try {
-        const body = await manage('profiles');
+        const body = await wizardApi('profiles');
         profiles = body.profiles || [];
     } catch (error) {
         profiles = [];
@@ -693,8 +737,8 @@ function renderProfiles() {
             return `<article class="panel-card">
                 <div class="panel-card-head">
                     <div>
-                        <strong>${profile.name}</strong>
-                        <span class="panel-meta">${profile.note || 'No note'}</span>
+                        <strong>${escapeHtml(profile.name)}</strong>
+                        <span class="panel-meta">${escapeHtml(profile.note || 'No note')}</span>
                     </div>
                     <span class="pill is-muted">${carries}</span>
                 </div>
@@ -709,11 +753,11 @@ function renderProfiles() {
 
 function renderProfileSelects() {
     $('bulk-profile').innerHTML = ['<option value="">Apply ZagiRo profile…</option>']
-        .concat(profiles.map(p => `<option value="${p.id}">${p.name}</option>`))
+        .concat(profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`))
         .join('');
 
     $('p-source').innerHTML = ['<option value="">Copy proxy settings from a panel…</option>']
-        .concat(panels.map(p => `<option value="${cardId(p)}">${p.name}</option>`))
+        .concat(connections.map(p => `<option value="${connId(p)}">${escapeHtml(p.label)}</option>`))
         .join('');
 }
 
@@ -747,15 +791,15 @@ function setSettingsState(settings) {
 }
 
 $('p-grab').addEventListener('click', async () => {
-    const panel = panelOfId($('p-source').value);
-    if (!panel) {
+    const connection = connectionOfId($('p-source').value);
+    if (!connection) {
         toast('Choose a panel to copy from.');
         return;
     }
 
     try {
-        const body = await manage('read-settings', { panel });
-        setSettingsState(body.settings || {});
+        const body = await panelApi(connection, 'settings');
+        setSettingsState((body || {}).settings || {});
         toast('Proxy settings copied into the profile.');
     } catch (error) {
         toast(String(error.message || error));
@@ -793,7 +837,7 @@ $('profile-save').addEventListener('click', async () => {
     const validDays = $('p-days').value.trim();
 
     try {
-        await manage('profile-save', {
+        await wizardApi('profiles/save', {
             profile: {
                 id: currentProfile ? currentProfile.id : undefined,
                 name,
@@ -817,7 +861,7 @@ $('profile-delete').addEventListener('click', async () => {
     if (!confirm(`Delete the profile "${currentProfile.name}"?`)) return;
 
     try {
-        await manage('profile-delete', { id: currentProfile.id });
+        await wizardApi('profiles/delete', { id: currentProfile.id });
         toast('Profile deleted.');
         $('profile-modal').hidden = true;
         await loadProfiles();
@@ -844,51 +888,43 @@ $('export').addEventListener('click', async () => {
     const button = $('export');
     const original = button.textContent;
 
-    // Details load lazily, one page at a time. Exporting `filtered` without
-    // fetching the rest produced blank rows for every panel off the current
-    // page while the toast reported them all as exported.
-    const missing = filtered.filter(panel => !details.has(cardId(panel)));
+    const missing = filtered.filter(connection => !details.has(connId(connection)));
 
     if (missing.length) {
         button.textContent = `Loading ${missing.length}…`;
         button.disabled = true;
 
-        for (const panel of missing) {
-            try {
-                details.set(cardId(panel), await manage('detail', { panel }));
-            } catch (error) {
-                // Recorded below as an incomplete row rather than a silent gap.
-            }
+        for (const connection of missing) {
+            await loadDetail(connection);
         }
 
         button.textContent = original;
         button.disabled = false;
     }
 
-    const rows = [['name', 'display name', 'status', 'used bytes', 'quota bytes', 'expires', 'portal']];
+    const rows = [['name', 'display name', 'status', 'used bytes', 'quota bytes', 'expires', 'panel']];
     let incomplete = 0;
 
-    filtered.forEach(panel => {
-        const detail = details.get(cardId(panel));
+    filtered.forEach(connection => {
+        const detail = details.get(connId(connection));
         if (!detail) incomplete++;
 
         const limits = (detail || {}).limits || {};
         const usage = (detail || {}).usage || {};
 
         rows.push([
-            panel.name,
+            connection.label,
             limits.displayName || '',
             (detail || {}).status || 'unknown',
             String(usage.totalBytes || 0),
             String(limits.limitTotalBytes || 0),
             limits.expireAt ? new Date(limits.expireAt).toISOString().split('T')[0] : '',
-            (detail || {}).portalUrl || ''
+            detail?.panelUrl || ''
         ]);
     });
 
     const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
 
-    // Actually download it; the button says Export, not Copy.
     try {
         const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -905,7 +941,6 @@ $('export').addEventListener('click', async () => {
             ? `Exported ${rows.length - 1} rows — ${incomplete} could not be read.`
             : `Exported ${rows.length - 1} rows.`);
     } catch (error) {
-        // Some embedded viewers block page-initiated downloads.
         try {
             await navigator.clipboard.writeText(csv);
             toast(`Download blocked — ${rows.length - 1} rows copied instead.`);
@@ -921,8 +956,8 @@ $('search').addEventListener('input', applyFilter);
 $('sort').addEventListener('change', applyFilter);
 
 $('refresh').addEventListener('click', async () => {
-    await loadPanels();
-    await Promise.all([loadProfiles(), loadAccountUsage()]);
+    await loadConnections();
+    await loadProfiles();
 });
 
 $('prev').addEventListener('click', () => { if (page > 0) { page--; renderPage(); } });
@@ -934,9 +969,8 @@ $('next').addEventListener('click', () => {
    Setting templates
 
    The same library the panel ships, vendored by scripts/sync-templates.mjs so
-   this build never needs the network. A template is shaped exactly like the
-   `settings` half of a ZagiRo profile, so applying one reuses the existing
-   apply-profile path and needs no new backend.
+   this build never needs the network. Applying one PUTs its settings to each
+   selected panel's API directly.
    ========================================================================== */
 
 const TEMPLATES = window.ZAG_TEMPLATES || [];
@@ -998,11 +1032,10 @@ document.addEventListener('click', async event => {
             if (!proceed) return;
         }
 
-        // A template carries settings only; limits stay whatever each panel has.
-        bulk(`Apply "${templateName(template)}" to`, panel =>
-            manage('apply-profile', {
-                panel,
-                profile: { name: templateName(template), settings: template.settings, limits: null }
+        bulk(`Apply "${templateName(template)}" to`, connection =>
+            panelApi(connection, 'settings', {
+                method: 'PUT',
+                body: JSON.stringify({ settings: template.settings })
             }));
 
         return;
@@ -1014,7 +1047,7 @@ document.addEventListener('click', async event => {
         if (!template) return;
 
         try {
-            await manage('profile-save', {
+            await wizardApi('profiles/save', {
                 profile: {
                     name: templateName(template),
                     note: templateDescription(template).slice(0, 200),

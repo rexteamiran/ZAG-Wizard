@@ -1,22 +1,20 @@
 /* ==========================================================================
    Panel record seeding
 
-   A panel writes its own limits record the first time it runs, which means a
-   freshly installed panel that nobody has opened has none — and the dashboard
-   then has nothing to show or edit.
-
-   So the wizard writes it at install time. It also records where the panel
-   lives, because the wizard knows the host and secure path here, while the
-   dashboard would otherwise have to recover them by parsing the deployed
-   script — which fails silently and leaves the links blank.
+   The panel reads and writes its limits record in the account's shared D1
+   database, namespaced by panel id. The wizard seeds it at install so a
+   freshly installed panel is manageable the moment it exists — and seeds the
+   first API key, which is what the dashboard uses to reach the panel later.
    ========================================================================== */
 
 const API = 'https://api.cloudflare.com/client/v4';
+const TABLE = 'zag_store';
 
 export interface PanelSeed {
     displayName: string;
     panelHost: string;
     panelPath: string;
+    panelId: string;
 }
 
 function randomToken(bytes = 16): string {
@@ -30,26 +28,6 @@ export async function sha256(value: string): Promise<string> {
     return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/**
- * Mints the key the wizard uses to reach the panel's own endpoints. The panel
- * stores only the hash for verification; the raw key sits beside it so the
- * wizard can read it back later.
- */
-export async function wizardKeyPair(): Promise<{ raw: string; entry: Record<string, any> }> {
-    const raw = randomToken(32);
-    return {
-        raw,
-        entry: {
-            id: crypto.randomUUID(),
-            name: 'Wizard',
-            hash: await sha256(raw),
-            createdAt: Date.now(),
-            lastUsed: 0
-        }
-    };
-}
-
-/** Matches src/settings/usage.ts defaultLimits() in the panel. */
 export function defaultLimits(seed: Partial<PanelSeed> = {}): Record<string, any> {
     return {
         displayName: seed.displayName ?? '',
@@ -58,7 +36,6 @@ export function defaultLimits(seed: Partial<PanelSeed> = {}): Record<string, any
         panelPath: seed.panelPath ?? '',
         showStatusNodes: true,
         zagiroName: '',
-        wizardKey: '',
         limitTotalBytes: 0,
         limitDailyBytes: 0,
         downSpeedKbps: 0,
@@ -85,68 +62,53 @@ async function d1Write(
     key: string,
     value: unknown
 ): Promise<void> {
-    const run = async (sql: string, params: unknown[]) => {
-        const res = await fetch(`${API}/accounts/${accountId}/d1/database/${databaseId}/query`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sql, params })
-        });
+    const res = await fetch(`${API}/accounts/${accountId}/d1/database/${databaseId}/query`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            sql: `INSERT INTO ${TABLE} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+            params: [key, JSON.stringify(value)]
+        })
+    });
 
-        if (!res.ok) throw new Error(`D1 write failed: HTTP ${res.status}`);
-    };
-
-    await run('CREATE TABLE IF NOT EXISTS zag_store (key TEXT PRIMARY KEY, value TEXT)', []);
-    await run(
-        'INSERT INTO zag_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-        [key, JSON.stringify(value)]
-    );
-}
-
-async function kvWrite(
-    token: string,
-    accountId: string,
-    namespaceId: string,
-    key: string,
-    value: unknown
-): Promise<void> {
-    const form = new FormData();
-    form.append('value', JSON.stringify(value));
-    form.append('metadata', '{}');
-
-    const res = await fetch(
-        `${API}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${key}`,
-        { method: 'PUT', headers: { 'Authorization': `Bearer ${token}` }, body: form }
-    );
-
-    if (!res.ok) throw new Error(`KV write failed: HTTP ${res.status}`);
+    if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`D1 write failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+    }
 }
 
 /**
- * Writes the panel's initial limits record. Prefers D1, falls back to KV, and
- * returns the record so the caller can report the portal link.
+ * Seeds the panel's limits record and its first API key. Returns the raw key
+ * (shown once, for the dashboard) plus the seeded record, for the portal link.
+ *
+ * The table may not exist on a brand-new shared database, so it is created
+ * here — the panel does the same lazily, and whichever comes up first wins.
  */
 export async function seedPanelRecord(
     token: string,
     accountId: string,
-    namespaceId: string,
     databaseId: string,
     seed: PanelSeed
-): Promise<Record<string, any>> {
+): Promise<{ record: Record<string, any>; apiKey: string }> {
+    const create = await fetch(`${API}/accounts/${accountId}/d1/database/${databaseId}/query`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: `CREATE TABLE IF NOT EXISTS ${TABLE} (key TEXT PRIMARY KEY, value TEXT)` })
+    });
+    if (!create.ok) throw new Error(`Could not prepare the panel database: HTTP ${create.status}`);
+
     const record = defaultLimits(seed);
 
-    const { raw, entry } = await wizardKeyPair();
-    record.wizardKey = raw;
-    record.panelApiKeys = [entry];
+    const rawKey = randomToken(32);
+    record.panelApiKeys = [{
+        id: crypto.randomUUID(),
+        name: 'Dashboard',
+        hash: await sha256(rawKey),
+        createdAt: Date.now(),
+        lastUsed: 0
+    }];
 
-    if (databaseId) {
-        try {
-            await d1Write(token, accountId, databaseId, 'limits', record);
-            return record;
-        } catch (error) {
-            console.log('D1 seed failed, falling back to KV:', error);
-        }
-    }
+    await d1Write(token, accountId, databaseId, `${seed.panelId}:limits`, record);
 
-    await kvWrite(token, accountId, namespaceId, 'limits', record);
-    return record;
+    return { record, apiKey: rawKey };
 }

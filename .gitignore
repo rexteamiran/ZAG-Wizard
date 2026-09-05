@@ -22,6 +22,8 @@
 !VERSION
 !scripts/
 !scripts/**
+!tests/
+!tests/**
 !README.md
 !LICENSE
 !package-lock.json

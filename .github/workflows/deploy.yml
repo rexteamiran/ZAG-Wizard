@@ -1,16 +1,16 @@
 # Deploys the wizard worker from GitHub's runners.
 #
-# Useful when `npm run deploy` on your own machine cannot reach
-# api.cloudflare.com. GitHub's network can, so the deploy always goes through.
-#
-# One-time setup - add two repository secrets under
+# One-time setup - add three repository secrets under
 # Settings -> Secrets and variables -> Actions -> New repository secret:
 #
-#   CLOUDFLARE_API_TOKEN   the same Cloudflare token the wizard uses
-#   WIZARD_SECRET          any long random string; it encrypts the private
-#                          install links the wizard hands out
+#   CLOUDFLARE_API_TOKEN   a token with Workers Scripts Edit, D1 Edit and
+#                          Account Settings Read on the wizard's account
+#   WIZARD_SECRET          any long random string; encrypts stored panel API
+#                          keys and signs sessions server-side
+#   WIZARD_INVITE_CODE     the code new accounts must present at sign-up;
+#                          leave unset to keep registration closed
 #
-# Then run this workflow from the Actions tab.
+# The deploy provisions the wizard's D1 database first, then runs wrangler.
 
 name: Deploy Wizard
 
@@ -39,6 +39,11 @@ jobs:
       - name: Type check
         run: npm run check
 
+      - name: Provision the wizard database
+        run: node scripts/provision.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
@@ -46,5 +51,7 @@ jobs:
           command: deploy
           secrets: |
             SECRET
+            WIZARD_INVITE_CODE
         env:
           SECRET: ${{ secrets.WIZARD_SECRET }}
+          WIZARD_INVITE_CODE: ${{ secrets.WIZARD_INVITE_CODE }}

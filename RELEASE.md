@@ -1,109 +1,40 @@
 # ZAGROOO Wizard
 
-Installs and centrally manages ZAGROOO Panel deployments.
+## 1.3.0 — accounts, group install and a panel-API dashboard
 
-## 1.2.0 — correctness
+### The dashboard became an account-based app
 
-### New: templates
+- Sign in with email and password; registration is gated by the
+  `WIZARD_INVITE_CODE` deploy secret. Passwords are PBKDF2-hashed, sessions
+  are hashed server-side, and no user can ever see another user's panels.
+- Panels are added on the dashboard's API page with a panel address and the
+  API key handed out at install. The browser then talks to each panel's API
+  directly — managing panels no longer consumes the wizard's request quota.
 
-A Templates tab carrying the same twenty-four setups the panel ships. Apply one
-to every panel you have selected, or save it as a ZagiRo profile and attach
-quotas to it.
+### Group install
 
-The list is vendored, so the wizard build never needs the network. Refresh it
-after a panel release with `npm run sync-templates`.
+- One form installs up to twenty panels at once. Unnamed panels count from a
+  global counter (`zag1`…`zag5` this install, `zag6` onward the next); a name
+  prefixes every panel instead (`Ali-1`, `Ali-2`, …).
+- All panels of an account share one D1 database (`zagrooo-panels`), each
+  namespaced by panel id. The free plan's ten-database cap no longer bounds
+  panel count.
 
-### Fixed: most panels were unmanageable
+### Removed
 
-The wizard read a panel's identity with a pattern that only matched the form it
-writes at install. A panel writes a different form whenever you save anything
-in its own admin UI — so the moment a panel was used at all, the wizard could
-no longer update it, attach D1, or repair its links. Both forms are now
-understood.
+- The Cloudflare-token dashboard: account request-quota card, panel discovery,
+  repair links, add-D1 and private install links are all gone. The token is
+  used only on the install page and only for the length of one install.
+- The local edition (`npm run local`) and its Node server — its CORS proxy was
+  the reason it existed, and the new dashboard talks to panels directly.
+- KV everywhere. Panels store everything in D1.
 
-### Fixed: the account request bar always read 0%
+### Upgrading
 
-The quota query needs the Account Analytics permission, which the "create a
-token" link never asked for. A denial comes back as a success with an error
-inside, so the bar showed a reassuring "0 of 100,000" — the one number meant to
-warn you before every panel stops. The permission is now requested, the failure
-is surfaced, and an unknown quota is shown as unknown.
+Panels deployed before 1.3.0 must be reinstalled once with this wizard —
+their old KV-based builds cannot self-update into the D1-only architecture.
 
-**Re-create your API token from the install page, or add Account Analytics:
-Read to the existing one.**
+## 1.2.1
 
-### Other fixes
-
-- Updating a panel no longer destroys its secrets, variables, extra bindings or
-  compatibility date.
-- Attaching D1 checks the download first, so a Cloudflare error page can never
-  be deployed as your worker, and no longer leaves an orphan database behind
-  when it fails.
-- Raising a limit revives a customer the panel had paused — that branch could
-  never run before.
-- The "Status notes in client" checkbox and the profile label now save.
-- Pages panels can be repaired.
-- A transient error no longer makes a panel vanish from the list.
-- **Export CSV** now actually downloads, and loads every panel's details first
-  instead of exporting blank rows for everything off the current page.
-- Selecting panels then filtering no longer leaves a bulk action pointed at
-  panels you cannot see.
-- A failed install shows the error instead of a blank terminal.
-
-
-## 1.1.0
-
-### ZagiRo profiles
-
-Saved bundles of limits and proxy settings. Build one, then apply it to any
-panels you pick — individually or in bulk. A profile can carry:
-
-- volume, speed and device limits
-- "valid for N days", turned into a real expiry date when applied
-- a full copy of another panel's proxy settings
-
-Profiles double as plan templates in the panel editor, so the old hard-coded
-templates are gone and yours take their place. They live in a KV namespace the
-wizard creates on the account, so they follow the account rather than a browser.
-
-### Account request guard
-
-The free plan allows 100,000 Worker requests per day across the **whole
-account**, not per worker. Twenty panels share one budget, and when it runs out
-every customer stops at once. The dashboard now shows that budget with a
-warning as it fills.
-
-### Managing panels
-
-- **Update from the dashboard**, one panel or many. Bulk updates are staged:
-  the first panel is health-checked before the rest are touched, so a bad
-  release cannot take every customer down at once.
-- **Add D1** to a panel installed without one, without deleting it.
-- **Repair links** for panels whose address the dashboard could not work out.
-- **Copy buttons** for both the panel link and the subscriber portal link.
-- **Bulk pause, resume and health check** across selected panels.
-- **Sort** by usage, soonest expiry, or problems first.
-- **Export** the panel list as CSV.
-- **Quick extend** buttons: +7 or +30 days, +10 or +50 GB.
-
-### Installing
-
-- **Display name** on the install form, shown on the subscriber portal and
-  throughout the dashboard.
-- The panel's record is written at install, so a new panel is manageable
-  before anyone opens it, and its links are known without guesswork.
-- The token template now requests **D1 Edit**. Without it the panel silently
-  fell back to KV, which allows far fewer writes per day.
-
-### Local edition
-
-`npm run local` now runs the same management code as the hosted wizard rather
-than a parallel implementation, so it can no longer fall behind. It needs the
-local server: a browser cannot call the Cloudflare API directly, because that
-API sends no CORS headers for token-authenticated requests.
-
-## Upgrading existing panels
-
-Panels installed by an earlier wizard have no D1 binding and keep using KV.
-They still appear in the dashboard and are fully manageable; use **Add D1** on
-one to move it over, and **Repair links** if its links are blank.
+- Wizard worker for the 1.2.x panel line: multi-panel dashboard, D1
+  provisioning, ZagiRo profiles and the local edition.
