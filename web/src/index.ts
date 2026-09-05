@@ -19,6 +19,7 @@ import { createStreamLogger } from './logger';
 import {
     sessionOf, handleAuth, json
 } from './auth';
+import { recordEvent, listEvents, clearEvents } from './eventlog';
 import {
     addConnection, deleteConnection, listConnections, updateConnection,
     listProfiles, saveProfile, deleteProfile
@@ -58,6 +59,13 @@ export default {
             return serve(env, request, 'dashboard.html');
         }
 
+        if (url.pathname === '/log') {
+            if (!session) {
+                return Response.redirect(new URL('/login', url.origin).href, 302);
+            }
+            return serve(env, request, 'log.html');
+        }
+
         if (url.pathname === '/login') {
             if (session) {
                 return Response.redirect(new URL('/dashboard', url.origin).href, 302);
@@ -89,6 +97,13 @@ async function handleApi(request: Request, env: Env, session: { userId: string; 
             case route === 'me':
                 return json({ success: true, body: { email: session.email } });
 
+            case route === 'log':
+                return json({ success: true, body: { events: await listEvents(env) } });
+
+            case route === 'log/clear':
+                await clearEvents(env);
+                return json({ success: true, message: 'Log cleared.' });
+
             case route === 'connections':
                 return json({ success: true, body: { connections: await listConnections(env, session.userId) } });
 
@@ -117,7 +132,9 @@ async function handleApi(request: Request, env: Env, session: { userId: string; 
                 return json({ success: false, message: `Unknown route: ${route}` }, 404);
         }
     } catch (error) {
-        return json({ success: false, message: error instanceof Error ? error.message : String(error) }, 400);
+        const message = error instanceof Error ? error.message : String(error);
+        await recordEvent(env, `api:${route}`, message, `User: ${session.email}`, 'error');
+        return json({ success: false, message }, 400);
     }
 }
 
@@ -135,7 +152,7 @@ async function handleInstall(request: Request, env: Env): Promise<Response> {
     }
 
     const logger = createStreamLogger();
-    const { readable, info, error, complete, close } = logger;
+    const { readable, info, success, error, complete, close } = logger;
 
     (async () => {
         try {
@@ -155,9 +172,22 @@ async function handleInstall(request: Request, env: Env): Promise<Response> {
                 token: apiToken, deployType, displayName, count, preRelease
             }, logger);
 
+            // Failed panels are streamed above; recording them here means the
+            // /log page keeps the whole story after the browser tab is gone.
+            for (const result of results.filter(r => r.error)) {
+                await recordEvent(env, 'install', `${result.name}: ${result.error}`, `Account: ${account.email}`, 'error');
+            }
+            if (results.some(r => !r.error)) {
+                await recordEvent(env, 'install',
+                    `${results.filter(r => !r.error).length} panel(s) installed`,
+                    `Account: ${account.email} · ${deployType}`, 'info');
+            }
+
             complete(JSON.stringify({ user: account.email, results }));
         } catch (err) {
-            error(`Install failed: ${err instanceof Error ? err.message : err}`);
+            const message = err instanceof Error ? err.message : String(err);
+            await recordEvent(env, 'install', message, 'Install failed before any panel was created.', 'error');
+            error(`Install failed: ${message}`);
         } finally {
             close();
         }

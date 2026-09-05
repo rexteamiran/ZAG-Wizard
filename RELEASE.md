@@ -1,5 +1,16 @@
 # ZAGROOO Wizard
 
+## 1.3.1 — the event log
+
+New: `/log`. Installs and their outcomes, sign-ins and their failures, and
+every request that died are recorded in the wizard's own database and shown
+on one page — what happened, from which subsystem, when, with the detail
+underneath. Filter by level or text, clear in one click. Reading it needs a
+signed-in account. Also fixes the deploy workflow: the provision step now
+searches every page of the D1 list, falls back to a direct name lookup, and
+reuses an existing database instead of failing when the account is at the
+ten-database cap.
+
 ## 1.3.0 — accounts, group install and a panel-API dashboard
 
 ### The dashboard became an account-based app

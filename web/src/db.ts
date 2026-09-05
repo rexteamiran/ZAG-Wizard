@@ -42,7 +42,15 @@ const SCHEMA: string[] = [
     `CREATE TABLE IF NOT EXISTS counters (
         prefix TEXT PRIMARY KEY,
         value INTEGER NOT NULL
-    )`
+    )`,
+    `CREATE TABLE IF NOT EXISTS wizard_log (
+        ts INTEGER NOT NULL,
+        level TEXT NOT NULL,
+        source TEXT NOT NULL,
+        message TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT ''
+    )`,
+    `CREATE INDEX IF NOT EXISTS wizard_log_ts ON wizard_log (ts)`
 ];
 
 let ready = false;

@@ -1,0 +1,158 @@
+/* ZAGROOO Wizard — install log page. Tokens live in theme.css. */
+
+.log-card {
+    padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.log-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.log-head h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.log-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.log-actions .btn {
+    font-size: var(--font-size-sm);
+    padding: 0.45rem 0.8rem;
+}
+
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.toolbar input[type="search"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--field);
+    color: var(--text);
+    outline: none;
+    font: inherit;
+    font-size: var(--font-size-sm);
+}
+
+.toolbar input[type="search"]:focus {
+    border-color: var(--accent);
+}
+
+.toolbar select {
+    padding: 0.5rem 0.75rem;
+}
+
+.events {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.event {
+    border: 1px solid var(--line-soft);
+    border-left: 3px solid var(--line);
+    border-radius: var(--radius-item);
+    padding: 0.6rem 0.9rem;
+    background: var(--surface-2);
+}
+
+.event.is-error {
+    border-left-color: var(--danger);
+}
+
+.event.is-warn {
+    border-left-color: var(--warn);
+}
+
+.event.is-info {
+    border-left-color: var(--accent);
+}
+
+.event-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.event-level {
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+}
+
+.is-error .event-level {
+    color: var(--danger);
+    background: var(--red-bg);
+}
+
+.is-warn .event-level {
+    color: var(--warn);
+    background: var(--amber-bg);
+}
+
+.is-info .event-level {
+    color: var(--accent);
+    background: var(--accent-tint);
+}
+
+.event-source {
+    font-weight: 600;
+    color: var(--text-2);
+    font-size: var(--font-size-xs);
+}
+
+.event-time {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.event-message {
+    margin-top: 0.3rem;
+    font-size: var(--font-size-sm);
+    word-break: break-word;
+}
+
+.event-detail {
+    margin-top: 0.4rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-item);
+    background: var(--surface-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-2);
+}
+
+.empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 2rem 1rem;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-item);
+}
+
+@media (max-width: 640px) {
+    .event-time {
+        margin-left: 0;
+        width: 100%;
+    }
+}

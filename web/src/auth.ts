@@ -9,6 +9,7 @@
    ========================================================================== */
 
 import { ensureSchema, query, run } from './db';
+import { recordEvent } from './eventlog';
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE = 'wizard_session';
@@ -180,16 +181,18 @@ export async function handleAuth(request: Request, env: Env): Promise<Response> 
 }
 
 async function register(request: Request, env: Env, body: Record<string, any>): Promise<Response> {
+    const email = String(body.email ?? '').trim().toLowerCase();
     const invite = (env.WIZARD_INVITE_CODE ?? '').trim();
     if (!invite) {
+        await recordEvent(env, 'auth', 'Registration attempt while registration is closed', `Email: ${email || '(none)'}`, 'warn');
         return json({ success: false, message: 'Registration is closed. Ask the operator for an account.' }, 403);
     }
 
     if (!body.invite || String(body.invite).trim() !== invite) {
+        await recordEvent(env, 'auth', 'Registration refused — wrong invite code', `Email: ${email || '(none)'}`, 'warn');
         return json({ success: false, message: 'Wrong invite code.' }, 403);
     }
 
-    const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -212,6 +215,7 @@ async function register(request: Request, env: Env, body: Record<string, any>): 
     );
 
     const token = await createSession(env, id);
+    await recordEvent(env, 'auth', 'Account created', `Email: ${email}`, 'info');
     return json({ success: true, body: { email } }, 200, { 'Set-Cookie': sessionCookie(token) });
 }
 
@@ -223,13 +227,15 @@ async function login(request: Request, env: Env, body: Record<string, any>): Pro
 
     const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');
-
     const rows = await query<UserRow>(env.db, 'SELECT * FROM users WHERE email = ?', [email]);
     const user = rows[0];
+
     if (!user || !(await verifyPassword(password, user.pass))) {
+        await recordEvent(env, 'auth', 'Failed login attempt', `Email: ${email || '(none)'}`, 'warn');
         return json({ success: false, message: 'Wrong email or password.' }, 401);
     }
 
     const token = await createSession(env, user.id);
+    await recordEvent(env, 'auth', 'Signed in', `Email: ${user.email}`, 'info');
     return json({ success: true, body: { email: user.email } }, 200, { 'Set-Cookie': sessionCookie(token) });
 }

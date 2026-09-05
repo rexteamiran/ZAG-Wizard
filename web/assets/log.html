@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZAGROOO Wizard — Install Log</title>
+    <link rel="icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link href="theme.css" rel="stylesheet" />
+    <link href="log.css" rel="stylesheet" />
+    <script>
+        (function () {
+            var KEY = 'zag-theme';
+            var root = document.documentElement;
+            try {
+                root.classList.toggle('dark', localStorage.getItem(KEY) !== 'light');
+            } catch (e) {
+                root.classList.add('dark');
+            }
+            document.addEventListener('click', function (event) {
+                var button = event.target.closest && event.target.closest('#theme-toggle');
+                if (!button) return;
+                var isDark = root.classList.toggle('dark');
+                try { localStorage.setItem(KEY, isDark ? 'dark' : 'light'); } catch (err) { }
+            });
+        })();
+    </script>
+</head>
+
+<body>
+    <button id="theme-toggle" class="zag-theme-toggle" type="button" title="Toggle theme" aria-label="Toggle theme">
+        <svg class="icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <svg class="icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+    </button>
+
+    <main class="wrap">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-mark">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M13 2 4.5 13.5H10L9 22l8.5-11.5H12L13 2z" />
+                    </svg>
+                </span>
+                <span class="brand-name">ZAGROOO Wizard</span>
+            </div>
+            <div class="topbar-right">
+                <a class="btn btn-ghost" href="/dashboard">Dashboard</a>
+                <a class="btn btn-ghost" href="/">Install</a>
+            </div>
+        </header>
+
+        <section class="card log-card">
+            <div class="log-head">
+                <div>
+                    <h2>Install &amp; account log</h2>
+                    <p class="muted small" style="margin:0.25rem 0 0">
+                        Everything this wizard recorded — installs, sign-ins, failed requests — newest first.
+                    </p>
+                </div>
+                <div class="log-actions">
+                    <button class="btn btn-ghost" id="refresh" type="button">Refresh</button>
+                    <button class="btn btn-danger" id="clear" type="button">Clear log</button>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <input type="search" id="filter" placeholder="Filter events…" />
+                <select id="level" class="form-select">
+                    <option value="">All levels</option>
+                    <option value="error">Errors</option>
+                    <option value="warn">Warnings</option>
+                    <option value="info">Info</option>
+                </select>
+            </div>
+
+            <div id="events" class="events">
+                <div class="empty">Loading…</div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="log.js"></script>
+</body>
+
+</html>
