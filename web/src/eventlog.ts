@@ -23,6 +23,15 @@ export interface WizardEvent {
     detail: string;
 }
 
+/** One log is read by every signed-in user, so no raw emails in it. */
+function redact(text: string): string {
+    return text.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, email => {
+        const at = email.indexOf('@');
+        const keep = Math.max(1, Math.min(2, at - 1));
+        return `${email.slice(0, keep)}***${email.slice(at)}`;
+    });
+}
+
 export async function recordEvent(
     env: Env,
     source: string,
@@ -36,7 +45,7 @@ export async function recordEvent(
             `INSERT INTO wizard_log (ts, level, source, message, detail)
              SELECT ?, ?, ?, ?, ?
              WHERE (SELECT COUNT(*) FROM wizard_log) < ?`,
-        ).bind(Date.now(), level, source.slice(0, 40), String(message).slice(0, 500), String(detail).slice(0, 2000), MAX_EVENTS).run();
+        ).bind(Date.now(), level, source.slice(0, 40), redact(String(message).slice(0, 500)), redact(String(detail).slice(0, 2000)), MAX_EVENTS).run();
 
         // Trim the oldest rows once the window has filled up. One delete per
         // event keeps the table bounded without any scheduled job.

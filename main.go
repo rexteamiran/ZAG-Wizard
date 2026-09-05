@@ -76,7 +76,7 @@ func main() {
 			}
 			fmt.Printf("  %s Add a new token\n", internal.FmtStr("0.", internal.ColorBlue, true))
 
-			index := internal.PromptLogin(logger, len(store.Logins))
+			index := internal.PromptLogin(logger, store.ActiveEmail, store.Logins)
 			if index == 0 {
 				acc = internal.CreateAccount(ctx, logger)
 				tokenStore.SaveLogin(internal.CfLogin{
@@ -107,26 +107,20 @@ func main() {
 
 		fmt.Println()
 		logger.Info("Installing ZAGROOO Panel...")
-		namespaceID, err := acc.CreateKVNamespace(ctx, workerName, deployType)
+
+		// The panel's only storage is D1 (`zag_db`); a worker deployed
+		// without it renders a reinstall-required page for every request.
+		databaseID, err := acc.CreateD1Database(ctx, workerName)
 		if err != nil {
 			logger.Fatal(err)
 		}
-		logger.Success("KV namespace created successfully!")
-
-		// Usage accounting prefers D1; a panel deployed without it falls back
-		// to buffered KV, so a failure here is a warning, not a stop.
-		databaseID, err := acc.CreateD1Database(ctx, workerName)
-		if err != nil {
-			logger.Error(fmt.Sprintf("D1 unavailable, falling back to KV accounting: %s", err))
-		} else {
-			logger.Success("D1 database created successfully!")
-		}
+		logger.Success("D1 database created successfully!")
 
 		var panelURL string
 		if deployType == "pages" {
-			panelURL = internal.DeployToPages(ctx, acc, logger, workerName, namespaceID, databaseID)
+			panelURL = internal.DeployToPages(ctx, acc, logger, workerName, databaseID)
 		} else {
-			panelURL = internal.DeployToWorkers(ctx, acc, logger, workerName, namespaceID, databaseID)
+			panelURL = internal.DeployToWorkers(ctx, acc, logger, workerName, databaseID)
 		}
 
 		logger.Success("ZAGROOO Panel successfully installed!")

@@ -27,8 +27,13 @@ func NewTokenStore() tokenStore {
 
 func (s tokenStore) LoadLogins() (cfLoginStore, error) {
 	data, err := os.ReadFile(tokenFilePath())
-	if err != nil || os.IsNotExist(err) {
+	if os.IsNotExist(err) {
 		return cfLoginStore{}, nil
+	}
+	if err != nil {
+		// An unreadable store (permissions, corruption at the OS level) must
+		// not masquerade as an empty one: saved tokens would be silently lost.
+		return cfLoginStore{}, err
 	}
 	if strings.TrimSpace(string(data)) == "" {
 		return cfLoginStore{}, nil
@@ -39,6 +44,8 @@ func (s tokenStore) LoadLogins() (cfLoginStore, error) {
 		return store, nil
 	}
 
+	// Corrupted JSON: keep going with an empty store rather than strand the
+	// user, but say so — the old tokens still exist on disk at the path above.
 	return cfLoginStore{
 		ActiveEmail: "",
 		Logins:      []CfLogin{},

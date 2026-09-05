@@ -14,7 +14,6 @@ import (
 
 	"github.com/cloudflare/cloudflare-go/v7"
 	"github.com/cloudflare/cloudflare-go/v7/accounts"
-	"github.com/cloudflare/cloudflare-go/v7/kv"
 	"github.com/cloudflare/cloudflare-go/v7/option"
 	"github.com/cloudflare/cloudflare-go/v7/pages"
 	"github.com/cloudflare/cloudflare-go/v7/workers"
@@ -88,13 +87,19 @@ func CreateCfAccount(ctx context.Context, token string) (*CfAccount, error) {
 	acc := NewCfAccount(token)
 
 	tokenRes, err := acc.Client.User.Tokens.Verify(ctx)
-	if err != nil || tokenRes.Status != "active" {
+	if err != nil {
 		return nil, err
+	}
+	if tokenRes.Status != "active" {
+		return nil, fmt.Errorf("API token is %s", tokenRes.Status)
 	}
 
 	accountsRes, err := acc.Client.Accounts.List(ctx, accounts.AccountListParams{})
 	if err != nil {
 		return nil, err
+	}
+	if len(accountsRes.Result) == 0 {
+		return nil, fmt.Errorf("this token has no Cloudflare account attached")
 	}
 	acc.ID = accountsRes.Result[0].ID
 
@@ -129,19 +134,6 @@ func (acc *CfAccount) NameTaken(ctx context.Context, deployType, name string) bo
 	)
 
 	return err == nil
-}
-
-func (acc *CfAccount) CreateKVNamespace(ctx context.Context, workerName string, deployType string) (string, error) {
-	title := fmt.Sprintf("%s-%s-%s", workerName, deployType, time.Now().UTC().Format(time.RFC3339))
-	namespace, err := acc.Client.KV.Namespaces.New(ctx, kv.NamespaceNewParams{
-		AccountID: cloudflare.F(acc.ID),
-		Title:     cloudflare.F(title),
-	})
-	if err != nil {
-		return "", err
-	}
-
-	return namespace.ID, nil
 }
 
 func (acc *CfAccount) GetWorkersDevSubdomain(ctx context.Context) (string, error) {
@@ -222,20 +214,14 @@ func (acc *CfAccount) CreateD1Database(ctx context.Context, workerName string) (
 	return parsed.Result.UUID, nil
 }
 
-// DeployWorker uploads the panel script with its KV and D1 bindings.
+// DeployWorker uploads the panel script with its D1 binding.
 //
 // This goes over the REST API rather than the Go SDK: the SDK's binding union
 // types drift between releases, and a multipart upload is easy enough to build
-// by hand. Pass an empty databaseID to deploy without D1, which makes the
-// panel fall back to buffered KV accounting.
-func (acc *CfAccount) DeployWorker(ctx context.Context, name string, script io.Reader, namespaceID, databaseID string) error {
+// by hand.
+func (acc *CfAccount) DeployWorker(ctx context.Context, name string, script io.Reader, databaseID string) error {
 	bindings := []map[string]string{
-		{"type": "kv_namespace", "name": "kv", "namespace_id": namespaceID},
-	}
-	if databaseID != "" {
-		bindings = append(bindings, map[string]string{
-			"type": "d1", "name": "zag_db", "id": databaseID,
-		})
+		{"type": "d1", "name": "zag_db", "id": databaseID},
 	}
 
 	metadata, err := json.Marshal(map[string]any{
@@ -328,26 +314,20 @@ func (acc *CfAccount) EnableSubdomain(ctx context.Context, subdomain string) err
 	return nil
 }
 
-// CreatePagesProject creates the Pages project with its KV and D1 bindings
-// and returns the *.pages.dev subdomain.
+// CreatePagesProject creates the Pages project with its D1 binding and
+// returns the *.pages.dev subdomain.
 //
 // Over the REST API rather than the Go SDK: the SDK's deployment-config types
 // change shape between releases, and getting a binding name wrong there is a
 // compile error rather than something the wizard can recover from.
-func (acc *CfAccount) CreatePagesProject(ctx context.Context, name, namespaceID, databaseID string) (string, error) {
+func (acc *CfAccount) CreatePagesProject(ctx context.Context, name, databaseID string) (string, error) {
 	production := map[string]any{
 		"browsers":            map[string]any{},
 		"compatibility_date":  time.Now().UTC().Format("2006-01-02"),
 		"compatibility_flags": []string{"nodejs_compat"},
-		"kv_namespaces": map[string]any{
-			"kv": map[string]string{"namespace_id": namespaceID},
-		},
-	}
-
-	if databaseID != "" {
-		production["d1_databases"] = map[string]any{
+		"d1_databases": map[string]any{
 			"zag_db": map[string]string{"id": databaseID},
-		}
+		},
 	}
 
 	body, err := json.Marshal(map[string]any{

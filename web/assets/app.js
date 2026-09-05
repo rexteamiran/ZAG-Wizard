@@ -106,6 +106,10 @@ function showResults(payload) {
     const list = (payload && payload.results) || [];
     if (!list.length) return;
 
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+
     const nodes = list.map(item => {
         const state = item.error
             ? `<span class="result-state is-error">failed</span>`
@@ -113,24 +117,24 @@ function showResults(payload) {
 
         const key = item.apiKey
             ? `<div class="result-key">
-                   <code>${item.apiKey}</code>
-                   <button type="button" class="copy-key" data-key="${item.apiKey}">Copy API key</button>
+                   <code>${esc(item.apiKey)}</code>
+                   <button type="button" class="copy-key" data-key="${esc(item.apiKey)}">Copy API key</button>
                </div>`
             : '';
 
         const links = [
-            item.url ? `<a href="${item.url}" target="_blank" rel="noopener">Panel</a>` : '',
-            item.portal ? `<a href="${item.portal}" target="_blank" rel="noopener">Portal</a>` : ''
+            item.url ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">Panel</a>` : '',
+            item.portal ? `<a href="${esc(item.portal)}" target="_blank" rel="noopener">Portal</a>` : ''
         ].filter(Boolean).join(' · ');
 
         return `<div class="result-item">
             <div class="result-head">
-                <strong>${item.name}</strong>
+                <strong>${esc(item.name)}</strong>
                 ${state}
                 <span class="result-links">${links}</span>
             </div>
             ${key}
-            ${item.error ? `<p class="result-error">${item.error}</p>` : ''}
+            ${item.error ? `<p class="result-error">${esc(item.error)}</p>` : ''}
         </div>`;
     });
 

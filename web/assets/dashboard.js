@@ -284,7 +284,7 @@ function cardMarkup(connection) {
             <label class="check-inline">
                 <input type="checkbox" class="select-panel" data-id="${id}" ${selected.has(id) ? 'checked' : ''} />
                 <span>
-                    <strong data-role="title">${connection.label}</strong>
+                    <strong data-role="title">${escapeHtml(connection.label)}</strong>
                     <span class="panel-meta" data-role="meta"></span>
                 </span>
             </label>
@@ -368,10 +368,11 @@ function paintDetail(connection, detail) {
     const links = [`<button type="button" data-edit="${connId(connection)}">Manage</button>`];
 
     if (host) {
-        links.push(`<a href="${host}" target="_blank" rel="noopener">Panel ↗</a>`);
+        // Panel responses are untrusted input; escape what they gave us.
+        links.push(`<a href="${escapeHtml(host)}" target="_blank" rel="noopener">Panel ↗</a>`);
     }
 
-    if (detail.error) links.push(`<span class="small">${detail.error}</span>`);
+    if (detail.error) links.push(`<span class="small">${escapeHtml(detail.error)}</span>`);
 
     card.querySelector('[data-role="links"]').innerHTML = links.join('');
 }
@@ -494,7 +495,7 @@ function renderPlanButtons() {
     const usable = profiles.filter(p => (p.limits && Object.keys(p.limits).length) || p.validDays);
 
     $('plan-buttons').innerHTML = usable.length
-        ? usable.map(p => `<button class="chip-btn" data-plan="${p.id}" type="button">${p.name}</button>`).join('')
+        ? usable.map(p => `<button class="chip-btn" data-plan="${escapeHtml(p.id)}" type="button">${escapeHtml(p.name)}</button>`).join('')
         : '<span class="muted small">No profiles yet — create one in the ZagiRo tab.</span>';
 }
 

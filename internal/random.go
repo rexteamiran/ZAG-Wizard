@@ -1,23 +1,44 @@
 package internal
 
 import (
+	crand "crypto/rand"
 	"fmt"
-	mrand "math/rand"
+	"math/big"
 	"strings"
 )
 
 func randInt(min, max int) int {
-	return mrand.Intn(max-min+1) + min
+	length, err := randInt64(int64(min), int64(max))
+	if err != nil {
+		return min
+	}
+	return int(length)
+}
+
+// randInt64 draws uniformly from [min, max] with the cryptographic source, so
+// panel credentials never depend on math/rand.
+func randInt64(min, max int64) (int64, error) {
+	if max < min {
+		max = min
+	}
+	span := big.NewInt(max - min + 1)
+	n, err := crand.Int(crand.Reader, span)
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64() + min, nil
 }
 
 func randString(charset string, minLen, maxLen int) string {
-	length := minLen + mrand.Intn(maxLen-minLen+1)
-	bytes := make([]byte, length)
-	for i := range bytes {
-		bytes[i] = charset[mrand.Intn(len(charset))]
+	length := randInt(minLen, maxLen)
+	var builder strings.Builder
+	builder.Grow(length)
+	for i := 0; i < length; i++ {
+		idx := randInt(0, len(charset)-1)
+		builder.WriteByte(charset[idx])
 	}
-	
-	return string(bytes)
+
+	return builder.String()
 }
 
 func randSubdomain() (string, error) {
@@ -39,14 +60,14 @@ func randCode() string {
 
 	var varsBuilder strings.Builder
 	for i := range varCount {
-		varName := fmt.Sprintf("__var_%s_%d", randString(charset, 8,16), i)
+		varName := fmt.Sprintf("__var_%s_%d", randString(charset, 8, 16), i)
 		value := randInt(0, 99999)
 		varsBuilder.WriteString(fmt.Sprintf("let %s = %d;\n", varName, value))
 	}
 
 	var funcsBuilder strings.Builder
 	for i := range funcCount {
-		funcName := fmt.Sprintf("__func_%s_%d", randString(charset, 8,16), i)
+		funcName := fmt.Sprintf("__func_%s_%d", randString(charset, 8, 16), i)
 		value := randInt(0, 999)
 		fmt.Fprintf(&funcsBuilder, "function %s() { return %d; }\n", funcName, value)
 	}

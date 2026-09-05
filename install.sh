@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 OS=$(uname -s)
 if [ "$OS" != "Linux" ] && [ "$OS" != "Darwin" ]; then
@@ -59,7 +60,7 @@ fi
 
 if [ "${NEEDS_INSTALL}" = "1" ]; then
     echo "Downloading ${ARCHIVE}..."
-    curl -L -# -o "${ARCHIVE}" "${ARCHIVE_URL}"
+    curl -fsSL -o "${ARCHIVE}" "${ARCHIVE_URL}"
 
     if [ "$EXT" = "zip" ]; then
         unzip -q -o "${ARCHIVE}" -d "${INSTALL_DIR}"

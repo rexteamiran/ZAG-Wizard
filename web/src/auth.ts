@@ -102,11 +102,18 @@ export function clearSessionCookie(): string {
 
 async function createSession(env: Env, userId: string): Promise<string> {
     const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
-    await run(
-        env.db,
-        'INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)',
-        [await sha256(token), userId, Date.now() + SESSION_TTL_MS]
-    );
+
+    // Sessions are only ever inserted, so piggyback a purge of the expired
+    // ones here — one DELETE per login keeps the table from growing forever.
+    await Promise.all([
+        run(
+            env.db,
+            'INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)',
+            [await sha256(token), userId, Date.now() + SESSION_TTL_MS]
+        ),
+        run(env.db, 'DELETE FROM sessions WHERE expires_at < ?', [Date.now()])
+    ]);
+
     return token;
 }
 
@@ -188,7 +195,7 @@ async function register(request: Request, env: Env, body: Record<string, any>): 
         return json({ success: false, message: 'Registration is closed. Ask the operator for an account.' }, 403);
     }
 
-    if (!body.invite || String(body.invite).trim() !== invite) {
+    if (!body.invite || !constantTimeEqual(String(body.invite).trim(), invite)) {
         await recordEvent(env, 'auth', 'Registration refused — wrong invite code', `Email: ${email || '(none)'}`, 'warn');
         return json({ success: false, message: 'Wrong invite code.' }, 403);
     }
@@ -208,11 +215,20 @@ async function register(request: Request, env: Env, body: Record<string, any>): 
     }
 
     const id = crypto.randomUUID();
-    await run(
-        env.db,
-        'INSERT INTO users (id, email, pass, created_at) VALUES (?, ?, ?, ?)',
-        [id, email, await hashPassword(password), Date.now()]
-    );
+    try {
+        await run(
+            env.db,
+            'INSERT INTO users (id, email, pass, created_at) VALUES (?, ?, ?, ?)',
+            [id, email, await hashPassword(password), Date.now()]
+        );
+    } catch (error) {
+        // Two registrations racing on one email: the loser hits the UNIQUE
+        // constraint. Report it the same friendly way as the check above.
+        if (/UNIQUE constraint/i.test(String((error as any)?.message ?? error))) {
+            return json({ success: false, message: 'An account with this email already exists.' }, 409);
+        }
+        throw error;
+    }
 
     const token = await createSession(env, id);
     await recordEvent(env, 'auth', 'Account created', `Email: ${email}`, 'info');
@@ -230,7 +246,11 @@ async function login(request: Request, env: Env, body: Record<string, any>): Pro
     const rows = await query<UserRow>(env.db, 'SELECT * FROM users WHERE email = ?', [email]);
     const user = rows[0];
 
-    if (!user || !(await verifyPassword(password, user.pass))) {
+    // Hash a dummy password when the account does not exist, so a timing
+    // side channel does not reveal which emails are registered.
+    const stored = user?.pass ?? 'pbkdf2:100000:00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000';
+
+    if (!user || !(await verifyPassword(password, stored))) {
         await recordEvent(env, 'auth', 'Failed login attempt', `Email: ${email || '(none)'}`, 'warn');
         return json({ success: false, message: 'Wrong email or password.' }, 401);
     }

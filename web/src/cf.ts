@@ -45,7 +45,11 @@ export class CFAccount {
     async nameTaken(deployType: string, name: string): Promise<boolean> {
         try {
             if (deployType === 'pages') {
+                // A taken Pages name must be reported as taken; falling
+                // through to the workers check below made a 404 on the worker
+                // side hide the collision until mid-install.
                 await this.client.pages.projects.get(name, { account_id: this.id });
+                return true;
             }
 
             await this.client.workers.scripts.get(name, { account_id: this.id });
@@ -85,6 +89,16 @@ export class CFAccount {
             return { id, name: SHARED_DB_NAME, created: true };
         } catch (error) {
             const message = String((error as any)?.message ?? error);
+
+            // Two installs racing each other: the loser's create fails with
+            // "already exists" because the winner just made it. Look it up
+            // instead of dying.
+            if (/already exists/i.test(message)) {
+                const again = await this.client.d1.database.list({ account_id: this.id });
+                const raced = again.result.find(db => db.name === SHARED_DB_NAME);
+                if (raced?.uuid && raced.name) return { id: raced.uuid, name: raced.name, created: false };
+            }
+
             if (!/limit reached|databases per account|quota/i.test(message)) throw error;
 
             // Fall back to the oldest database. Prefer one the panel line
@@ -122,7 +136,7 @@ export class CFAccount {
                     account_id: this.id,
                     subdomain: randSubdomain(),
                 });
-                return res.subdomain;
+                return `${res.subdomain}.workers.dev`;
             } catch (err) {
                 continue;
             }

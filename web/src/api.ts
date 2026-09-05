@@ -96,7 +96,7 @@ export async function updateConnection(env: Env, userId: string, id: string, bod
         if (!row) throw new Error('No such connection.');
 
         const label = body.label !== undefined ? String(body.label).trim().slice(0, 60) || row.label : row.label;
-        const apiUrl = body.apiUrl !== undefined ? normaliseApiUrl(String(body.apiUrl)) : row.api_url;
+        const apiUrl = body.apiUrl !== undefined ? normaliseApiUrl(String(body.apiUrl)) || row.api_url : row.api_url;
         const apiKey = body.apiKey ? await encrypt(String(body.apiKey).trim(), env.SECRET) : row.api_key;
 
         await run(

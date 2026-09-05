@@ -7,17 +7,8 @@ interface Script {
     path: string;
 }
 
-export async function buildScript(
-    account: CFAccount,
-    workerName: string,
-    subdomain: string,
-    filename: string,
-    preRelease: boolean,
-    databaseId: string
-): Promise<Script> {
-    const pathCharset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456780-_';
-    const passCharset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$&*_-+;:,.';
-
+/** Downloads the panel worker once per install, not once per panel. */
+export async function fetchPanelScript(preRelease: boolean): Promise<string> {
     let url = 'https://github.com/rexteamiran/ZAG-Panel/releases/latest/download/worker.js';
     if (preRelease) {
         const res = await fetch('https://raw.githubusercontent.com/rexteamiran/ZAG-Panel/refs/heads/dev/package.json');
@@ -34,7 +25,21 @@ export async function buildScript(
         throw new Error(`Failed to get panel script: status ${res.status} at ${res.url}`);
     }
 
-    const script = await res.text();
+    return await res.text();
+}
+
+export async function buildScript(
+    account: CFAccount,
+    workerName: string,
+    subdomain: string,
+    filename: string,
+    sourceScript: string,
+    databaseId: string
+): Promise<Script> {
+    const pathCharset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456780-_';
+    const passCharset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$&*_-+;:,.';
+
+    const script = sourceScript;
     const buildTimestamp = new Date().toISOString();
     const randomCode = randCode();
     const path = randString(pathCharset, 12, 16);

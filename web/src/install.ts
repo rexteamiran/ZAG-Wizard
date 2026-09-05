@@ -12,12 +12,18 @@
    ========================================================================== */
 
 import { CFAccount, SHARED_DB_NAME } from './cf';
-import { buildScript } from './script';
+import { buildScript, fetchPanelScript } from './script';
 import { seedPanelRecord } from './seed';
 import { ensureSchema, takeCounter } from './db';
 import { StreamLogger } from './logger';
 
-const MAX_GROUP = 20;
+/**
+ * Each panel costs roughly five Cloudflare subrequests (name check, deploy,
+ * subdomain, two seed writes) against the request's budget — the free plan
+ * allows fifty. Six keeps a group install comfortably inside that, including
+ * the shared-database lookup and the panel-script download.
+ */
+const MAX_GROUP = 6;
 
 export interface InstallRequest {
     token: string;
@@ -68,11 +74,18 @@ export async function installPanels(
             : `Installing ${count} panels: ${prefix}${start} to ${prefix}${start + count - 1}.`);
     }
 
+    // Identical for every panel in the group, and each fetch is one
+    // subrequest against the request's budget — fetch them once, not per
+    // panel, or a group install exhausts the subrequest limit mid-way.
+    const isPages = request.deployType === 'pages';
+    const subdomain = isPages ? 'pages.dev' : await account.workersDevSubdomain();
+    const sourceScript = await fetchPanelScript(request.preRelease);
+
     const results: InstallResult[] = [];
 
     for (let i = 0; i < count; i++) {
         const displayName = request.displayName ? `${prefix}-${start + i}` : `${prefix}${start + i}`;
-        results.push(await installOne(account, request, sharedDb.id, displayName, logger));
+        results.push(await installOne(account, request, sharedDb.id, displayName, subdomain, sourceScript, logger));
     }
 
     if (results.every(r => !r.error)) {
@@ -90,6 +103,8 @@ async function installOne(
     request: InstallRequest,
     databaseId: string,
     displayName: string,
+    subdomain: string,
+    sourceScript: string,
     logger: StreamLogger
 ): Promise<InstallResult> {
     const { success, error } = logger;
@@ -103,14 +118,10 @@ async function installOne(
             workerName = randWorkerName(displayName);
         } while (await account.nameTaken(request.deployType, workerName));
 
-        // Workers deploy under <name>.<account-subdomain>; Pages under
-        // <project>.pages.dev, where the project name is the worker name.
-        const subdomain = isPages ? 'pages.dev' : await account.workersDevSubdomain();
-
         const { script, path } = await buildScript(
             account, workerName, subdomain,
             isPages ? '_worker.js' : 'worker.js',
-            request.preRelease, databaseId
+            sourceScript, databaseId
         );
         success(`${displayName}: script built!`);
 

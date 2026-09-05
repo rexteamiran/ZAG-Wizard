@@ -98,6 +98,11 @@ async function handleApi(request: Request, env: Env, session: { userId: string; 
                 return json({ success: true, body: { email: session.email } });
 
             case route === 'log':
+                // The log page clears with DELETE /api/log.
+                if (request.method === 'DELETE') {
+                    await clearEvents(env);
+                    return json({ success: true, message: 'Log cleared.' });
+                }
                 return json({ success: true, body: { events: await listEvents(env) } });
 
             case route === 'log/clear':

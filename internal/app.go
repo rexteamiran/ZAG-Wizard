@@ -49,7 +49,7 @@ func CreateAccount(ctx context.Context, logger *Logger) *CfAccount {
 	return acc
 }
 
-func DeployToWorkers(ctx context.Context, acc *CfAccount, logger *Logger, workerName, namespaceID, databaseID string) string {
+func DeployToWorkers(ctx context.Context, acc *CfAccount, logger *Logger, workerName, databaseID string) string {
 	subdomain, err := acc.GetWorkersDevSubdomain(ctx)
 	if err != nil {
 		subdomain, err = acc.CreateWorkersDevSubdomain(ctx)
@@ -68,7 +68,7 @@ func DeployToWorkers(ctx context.Context, acc *CfAccount, logger *Logger, worker
 	}
 	logger.Success("Script built successfully!")
 
-	if err := acc.DeployWorker(ctx, workerName, script, namespaceID, databaseID); err != nil {
+	if err := acc.DeployWorker(ctx, workerName, script, databaseID); err != nil {
 		logger.Fatal(err)
 	}
 	logger.Success("Worker deployed successfully!")
@@ -82,14 +82,14 @@ func DeployToWorkers(ctx context.Context, acc *CfAccount, logger *Logger, worker
 	return fmt.Sprintf("https://%s.%s/%s/panel", workerName, subdomain, path)
 }
 
-func DeployToPages(ctx context.Context, acc *CfAccount, logger *Logger, workerName, namespaceID, databaseID string) string {
+func DeployToPages(ctx context.Context, acc *CfAccount, logger *Logger, workerName, databaseID string) string {
 	script, settings, err := buildScript(acc, workerName, "pages.dev")
 	if err != nil {
 		logger.Fatal(err)
 	}
 	logger.Success("Script built successfully!")
 
-	subdomain, err := acc.CreatePagesProject(ctx, workerName, namespaceID, databaseID)
+	subdomain, err := acc.CreatePagesProject(ctx, workerName, databaseID)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -126,7 +126,17 @@ func PromptWizard(logger *Logger) bool {
 	}
 }
 
-func PromptLogin(logger *Logger, total int) int {
+// PromptLogin returns the index (1-based) of the chosen login, or 0 for "add
+// a new token". Empty input selects the account marked active.
+func PromptLogin(logger *Logger, active string, logins []CfLogin) int {
+	defaultIndex := 1
+	for i, login := range logins {
+		if login.Email == active {
+			defaultIndex = i + 1
+			break
+		}
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Println()
@@ -136,16 +146,19 @@ func PromptLogin(logger *Logger, total int) int {
 			logger.Fatal(err)
 		}
 		resp := strings.TrimSpace(line)
+
 		if resp == "" {
-			return 1
+			return defaultIndex
 		}
 
 		number, err := strconv.Atoi(resp)
 		if err != nil {
-			logger.Fatal(err)
+			logger.Error("Enter a number, try again...")
+			continue
 		}
 
-		if number > total {
+		// No lower bound meant "-1" reached the slice below and panicked.
+		if number < 0 || number > len(logins) {
 			logger.Error("Out of range, try again...")
 			continue
 		}
@@ -246,7 +259,9 @@ type Permission struct {
 func BuildTokenURL() (string, error) {
 	permissions := []Permission{
 		{Key: "workers_scripts", Type: "edit"},
-		{Key: "workers_kv_storage", Type: "edit"},
+		// Every panel binds the account's shared D1 database; without this
+		// permission the deployed panel cannot store anything.
+		{Key: "d1", Type: "edit"},
 		{Key: "page", Type: "edit"},
 		{Key: "dns", Type: "edit"},
 		{Key: "user_details", Type: "read"},
