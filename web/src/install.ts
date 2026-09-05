@@ -53,9 +53,13 @@ export async function installPanels(
 
     const sharedDb = await account.findOrCreateSharedDatabase();
     if (sharedDb.created) {
-        success(`Shared database ${SHARED_DB_NAME} created!`);
+        success(`Shared database ${sharedDb.name} created!`);
+    } else if (sharedDb.name === SHARED_DB_NAME) {
+        info(`Using the existing shared database ${sharedDb.name}.`);
     } else {
-        info(`Using the existing shared database ${SHARED_DB_NAME}.`);
+        // The account was at Cloudflare's ten-database cap, so an older
+        // database was reused. Panels namespace their rows, so this is safe.
+        info(`The account is at the D1 limit — reusing database ${sharedDb.name} for all panels.`);
     }
 
     if (count > 1) {

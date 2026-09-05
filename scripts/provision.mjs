@@ -58,11 +58,30 @@ async function main() {
     if (database) {
         console.log(`Found existing database ${DB_NAME} (${database.uuid}).`);
     } else {
-        database = await cf(`/accounts/${id}/d1/database`, {
-            method: 'POST',
-            body: JSON.stringify({ name: DB_NAME })
-        });
-        console.log(`Created database ${DB_NAME} (${database.uuid}).`);
+        try {
+            database = await cf(`/accounts/${id}/d1/database`, {
+                method: 'POST',
+                body: JSON.stringify({ name: DB_NAME })
+            });
+            console.log(`Created database ${DB_NAME} (${database.uuid}).`);
+        } catch (error) {
+            // The free plan caps accounts at ten D1 databases. Accounts that
+            // ran the 1.2.x wizard have ten per-panel databases already —
+            // that is exactly the situation, and the wizard only needs its
+            // own small store. Any existing database works: the wizard's
+            // tables are created on first use, and its table names do not
+            // collide with a panel's `zag_store`.
+            const message = String(error.message ?? error);
+            if (/limit reached|databases per account|quota/i.test(message)) {
+                console.warn('The account is at the D1 database limit. Reusing the first existing database for the wizard.');
+                const page = await cf(`/accounts/${id}/d1/database?page=1&per_page=1`);
+                database = page.result?.[0];
+                if (!database?.uuid) throw new Error('No existing database to reuse.');
+                console.log(`Reusing ${database.name} (${database.uuid}) for the wizard.`);
+            } else {
+                throw error;
+            }
+        }
     }
 
     let toml = readFileSync(configPath, 'utf8');

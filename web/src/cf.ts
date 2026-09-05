@@ -60,21 +60,43 @@ export class CFAccount {
      * One database for every panel keeps installs under the free plan's
      * ten-database cap, however many panels an account runs — each panel
      * namespaces its own rows inside it.
+     *
+     * When the account is already at that cap — the normal state for an
+     * account that ran the 1.2.x wizard, whose ten per-panel databases fill
+     * the quota — the first existing database is reused instead. Panels
+     * namespace every row with their panel id, so sharing is safe; the only
+     * name a panel touches is its own `zag_store` table, which the 1.2.x
+     * panels also used.
      */
-    async findOrCreateSharedDatabase(): Promise<{ id: string; created: boolean }> {
+    async findOrCreateSharedDatabase(): Promise<{ id: string; name: string; created: boolean }> {
         const existing = await this.client.d1.database.list({ account_id: this.id });
         const found = existing.result.find(db => db.name === SHARED_DB_NAME);
-        if (found?.uuid) return { id: found.uuid, created: false };
+        if (found?.uuid && found.name) return { id: found.uuid, name: found.name, created: false };
 
-        const created = await this.client.d1.database.create({
-            account_id: this.id,
-            name: SHARED_DB_NAME
-        });
+        try {
+            const created = await this.client.d1.database.create({
+                account_id: this.id,
+                name: SHARED_DB_NAME
+            });
 
-        const id = created.uuid ?? '';
-        if (!id) throw new Error('Cloudflare returned no database id.');
+            const id = created.uuid ?? '';
+            if (!id) throw new Error('Cloudflare returned no database id.');
 
-        return { id, created: true };
+            return { id, name: SHARED_DB_NAME, created: true };
+        } catch (error) {
+            const message = String((error as any)?.message ?? error);
+            if (!/limit reached|databases per account|quota/i.test(message)) throw error;
+
+            // Fall back to the oldest database. Prefer one the panel line
+            // already owns, so the wizard's and panels' rows live together
+            // rather than in a random user database.
+            const reuse = existing.result.find(db => db.uuid && db.name?.endsWith('-zagrooo')) ?? existing.result.find(db => db.uuid && db.name);
+            if (!reuse?.uuid || !reuse.name) {
+                throw new Error('This account is at the D1 database limit and has no existing database to reuse. Delete one, or upgrade the plan.');
+            }
+
+            return { id: reuse.uuid, name: reuse.name, created: false };
+        }
     }
 
     async getWorkersDevSubdomain(): Promise<string> {
