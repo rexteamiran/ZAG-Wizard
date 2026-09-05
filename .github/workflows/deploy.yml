@@ -63,6 +63,7 @@ jobs:
           echo "$list" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           WIZARD_INVITE_CODE: ${{ secrets.WIZARD_INVITE_CODE }}
           WIZARD_SECRET: ${{ secrets.WIZARD_SECRET }}
 
