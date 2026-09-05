@@ -1,5 +1,41 @@
 # ZAGROOO Wizard
 
+## 1.3.2 — design system v2, and a full engineering pass
+
+The install page now follows the shared design system (see DESIGN.md): one
+clay action per view, inputs carved from the field well, colour-only hover
+states, and result cards on proper radii with mono tabular keys. theme.css
+is byte-identical with the panel's copy.
+
+A full review also fixed defects that shipped in earlier versions:
+
+- Group installs capped at six panels per run: every panel used to
+  re-download the panel script and re-fetch the account subdomain, burning
+  ~7 subrequests each — past panel six or seven, the free plan's 50-
+  subrequest budget died mid-install and every remaining panel failed.
+- A brand-new account's workers.dev subdomain was embedded without its
+  ".workers.dev" suffix, making the first installed panel unreachable.
+- Two installs racing the shared-database create failed on "already
+  exists"; they now re-look-up and continue.
+- The log page's "clear" button deleted nothing (it called the read route).
+- The event log recorded every user's full email and was readable by every
+  signed-in account; emails are redacted at the boundary now.
+- Expired sessions were never deleted; a purge rides along with each login.
+- Login leaked whether an email was registered, by timing; the invite code
+  is now compared in constant time.
+- Dashboard cards escaped neither panel-reported hosts and errors nor
+  connection labels and profile names (XSS); all go through escapeHtml.
+- The CLI's release workflow died on a script removed in 1.3.0, so no CLI
+  binary was ever published from this line — installers downloaded a 404.
+  The workflow is fixed and publishes binaries again.
+- The CLI generated the panel's secret path and Trojan password with
+  math/rand, accepted negative menu input (crash), crashed on expired
+  tokens, and — missing the D1 permission in its token template — deployed
+  panels that die on their own reinstall page. All fixed; D1 is now
+  required, the dead KV fallback is gone, and secrets use crypto/rand.
+- install.sh no longer happily un-tars a 404 page (set -euo pipefail,
+  curl -f); install.ps1 forces TLS 1.2 for Windows PowerShell 5.1.
+
 ## 1.3.1 — the event log
 
 New: `/log`. Installs and their outcomes, sign-ins and their failures, and
