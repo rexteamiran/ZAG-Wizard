@@ -1,6 +1,6 @@
 {
     "name": "zagrooo-wizard",
-    "version": "1.3.2",
+    "version": "1.3.3",
     "description": "ZAGROOO Wizard — install and manage ZAGROOO panels",
     "main": "web/src/index.ts",
     "repository": {
